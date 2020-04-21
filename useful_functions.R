@@ -3,62 +3,57 @@
 ##### January 2016 - ... , EMBL-EBI, N.Volkova (nvolkova@ebi.ac.uk)        #####
 ################################################################################
 
+# A set of useful functions
+
+# round all numeric columns of a dataframe
 round_dataframe <- function(df, n = 2) {
-  
   inds <- which(sapply(df,is.numeric))
-  
   for (j in inds) df[,j] <- round(df[,j],n)
-  
   return(df)
-  
 }
 
-lenght <- function(x) {
-  message("Learn to spell it properly!")
-  return(length(x))
-}
-
+# return the top n elements of a vector
 top <- function(x,n) {
   return(sort(x,decreasing=T)[1:n])
 }
-
+# return indices of top n elements of a vector
 which.top <- function(x,n) {
   if (is.null(names(x))) return(order(x,decreasing=T)[1:n])
   return(names(x)[order(x,decreasing=T)][1:n])
 }
 
+# return the bottom n elements of a vector
 bottom <- function(x,n) {
   return(sort(x,decreasing=F)[1:n])
 }
+# return indices of the bottom n elements of a vector
 which.bottom <- function(x,n) {
   if (is.null(names(x))) return(order(x,decreasing=F)[1:n])
   return(names(x)[order(x,decreasing=F)][1:n])
 }
 
+# cosine similarity
 cosine <- function(x,y) {
     return(sum(x * y) / sqrt(sum(x**2)) / sqrt(sum(y**2)))
 }
 
+# KL-divergence for real values
 divergence <- function (a,b) {
   return (sum(a * log ( (a+.Machine$double.eps)/(b + .Machine$double.eps)) - a + b))
 }
 
+# KL divergence for probabilities
 KL <- function(p,q) {
   return(sum(p * log2((p+0.001)/(q+0.001))))
 }
 
+# Jensen-Shaennon distance
 JSdistance <- function(p,q) {
   M = 0.5*(p+q)
   return (sqrt(0.5*KL(p,M) + 0.5*KL(q,M)))
 }
 
-restore <- function(x) {
-  t1 <- unlist(strsplit(x, split = '[:]'))
-  t2 <- c(t1[1],unlist(strsplit(t1[2], split = '[_]')))
-  t3 <- c(t2[1:2],unlist(strsplit(t2[3], split = '[/]')))
-  return(t3)
-}
-
+# read in a set of VCF files
 read_ce_vcf <- function(file, genome = "WBcel235") {
   out <- tryCatch(
     {
@@ -82,21 +77,12 @@ read_ce_vcf <- function(file, genome = "WBcel235") {
   return(out)
 }
 
-combination_check <- function(x,y) {
-  objective <- function(l) {
-    return(-as.numeric(cosine(y,x %*% t(t(l)))))
-  }
-  return(optim(par = rep(1,ncol(x)), objective, lower=rep(0,ncol(x))))
-}
-
-divergence <- function (a,b) {
-  return (a * log ( (a+.Machine$double.eps)/(b + .Machine$double.eps)) - a + b)
-}
-
+# reverse complement
 RevCom <- function(x) {
   return(as.character(reverseComplement(DNAString(x))))
 }
 
+# plot all a signature and all its chances
 plot_all_changes <- function(plot_fc,S_est,beta_est,n = F) {
   to.show <- data.frame(t(S_est))
   for (j in 1:nrow(beta_est)) {
@@ -106,6 +92,7 @@ plot_all_changes <- function(plot_fc,S_est,beta_est,n = F) {
   plot_fc(to.show, norm = n)
 }
 
+# collect trinucleotide substitutions from a C. elegans vcf
 getTrinucleotideSubs <- function(vcf, ref_genome="BSgenome.Celegans.UCSC.ce11") {
   seqlevels(vcf) <- seqnames(get(ref_genome))
   if (ref_genome==worm_ref_genome)
@@ -122,6 +109,7 @@ getTrinucleotideSubs <- function(vcf, ref_genome="BSgenome.Celegans.UCSC.ce11") 
   return(s)
 }
 
+# collect trinucleotide substitutions from human vcf file
 getTrinucleotideSubs_human_table <- function(subs, ref_genome = 'BSgenome.Hsapiens.UCSC.hg19', chr = 0) {
   g = get(ref_genome)
   if (is.na(subs)) return(NA)
@@ -146,7 +134,7 @@ getTrinucleotideSubs_human_table <- function(subs, ref_genome = 'BSgenome.Hsapie
   return(s)
 }
 
-
+# adjust trinucleotide variants to pyrimidine reference
 tncToPyrimidine <- function(nucl) {
   ind <- sort(c(grep('[G',nucl,fixed = T),grep('[A',nucl,fixed = T)))
   newnucl <- as.character(reverseComplement(DNAStringSet(paste(substr(nucl[ind],1,1),
@@ -160,11 +148,13 @@ tncToPyrimidine <- function(nucl) {
   return(nucl)
 }
 
+# reverse complement with mutation type
 RevComMutType <- function(nucl) {
   tmp <- unlist(strsplit(nucl, split = ''))
   return(paste0(RevCom(tmp[7]),'[',RevCom(tmp[3]),'>',RevCom(tmp[5]),']',RevCom(tmp[1])))
 }
 
+# collect dinucleotide variant types from VCF
 get_DNV_type <- function(vcf, ref_genome="BSgenome.Celegans.UCSC.ce11", dnv.types) {
   s <- paste0(paste(as.character(ref(vcf)),collapse=''), ">", paste(as.character(unlist(alt(vcf))), collapse=''))
   if (!(s %in% dnv.types)) {
@@ -174,12 +164,14 @@ get_DNV_type <- function(vcf, ref_genome="BSgenome.Celegans.UCSC.ce11", dnv.type
   return(s)
 }
 
+# check if a set of variants is MNV or not
 isMNV <- function(vcf) {
   d <- diff(start(vcf)) == 1 & abs(diff(geno(vcf)$PM[,"TUMOUR"] )) <= 0.05
   w <- c(FALSE, d) | c(d, FALSE)
   return(w)
 }
 
+# check if variants are in a repeat or not
 is.in.repeat <- function(vcf, ref_genome="BSgenome.Celegans.UCSC.ce11") {
   seqlevels(vcf) <- c("chrM","chrIV","chrIII","chrX","chrI","chrV","chrII")
   vcf <- vcf[as.character(seqnames(vcf)) != "chrM"]
@@ -199,6 +191,7 @@ is.in.repeat <- function(vcf, ref_genome="BSgenome.Celegans.UCSC.ce11") {
   return(in.repeat)
 }
 
+# derive minimal range from a set of ranges
 min_ranges <- function(gr) {
   if (length(gr) == 1) return(gr)
   to.merge <- 1
@@ -233,8 +226,10 @@ min_ranges <- function(gr) {
   return(gr)
 }
 
+# GRanges overlap over 50%
 `%over.50%` <- function(query, subject) overlapsAny(query, subject, minoverlap = 0.5 * min(width(query),width(subject)))
 
+# filtering breakpoints
 filter.breakpoints <- function(SV, reference) {
   
   reference$CHR1 <- as.character(reference$CHR1)

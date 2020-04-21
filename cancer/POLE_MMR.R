@@ -26,9 +26,12 @@ types.full <- paste(rep(rep(c('A','C','G','T'), each = 4), 6), '[', rep(c('C','T
 indels <- c("D.1.5","D.5.50","D.50.400","DI.small","DI.large","I.1.5","I.5.50","I.50.400")
 
 # TCGA data
-bigmat <- read.table('TCGA.caveman.matrix.dat',sep='\t')
+PATH_TO_TCGA_MATRIX='path_to_table_with_mutation_counts_for_TCGA'
+bigmat <- read.table(PATH_TO_TCGA_MATRIX,sep='\t')
 bigmat <- bigmat[rowSums(bigmat) > 50 & rowSums(bigmat) < 50000,]
-metadata <- read.table('TCGA_caveman_patients_to_files.dat', sep='\t', header=T)
+
+PATH_TO_METADATA='path_to_table_with_sample_names_and_projects_and_median_normalised_expression'
+metadata <- read.table(PATH_TO_METADATA, sep='\t', header=T)
 alternative_rownames_bigmat <- paste0('TCGA',substr(rownames(bigmat),5,nchar(row.names(bigmat))))
 donor.mut.mat <- bigmat[metadata$project[match(alternative_rownames_bigmat, metadata$tumour)] == 'UCEC',]
 rownames(donor.mut.mat) <- sapply(rownames(donor.mut.mat), function(x) gsub(pattern = 'H_LR', replacement = 'TCGA', x = x))
@@ -36,16 +39,18 @@ donor.mut.mat[is.na(donor.mut.mat)] <- 0
 donor.mut.mat <- donor.mut.mat[rowSums(donor.mut.mat[,1:96])>0,]
 ucec <- rownames(donor.mut.mat)
 
-# clinical data frmo TCGA
-donor <- read.delim('~/Downloads/tcga_ucec/donor.tsv', sep='\t', header=T)
-clin.sample <- read.delim('~/Downloads/tcga_ucec/sample.tsv', sep='\t', header=T)
-clin.specimen <- read.delim('~/Downloads/tcga_ucec/specimen.tsv', sep='\t', header=T)
+# clinical data from TCGA
+PATH_TO_UCEC='path_to_UCEC_data_from_ICGC/'
+donor <- read.delim(paste0(PATH_TO_UCEC,'donor.tsv'), sep='\t', header=T)
+clin.sample <- read.delim(paste0(PATH_TO_UCEC,'sample.tsv'), sep='\t', header=T)
+clin.specimen <- read.delim(paste0(PATH_TO_UCEC,'specimen.tsv'), sep='\t', header=T)
 ucec <- ucec[substr(ucec,1,16) %in% clin.specimen$submitted_specimen_id]
 data <- data.frame(row.names = ucec, age = donor$donor_age_at_diagnosis[match(substr(ucec,1,12), donor$submitted_donor_id)])
 
 # POLE mutations in TCGA
 # get mutations using the mutations.sh bash script
-tmp <- read.delim('TCGA/Genes/POLE_mutations.txt', sep='\t', header = T)
+PATH_TO_POLE_MUTATIONS='path_to_table_with_POLE_mutations_per_sample'
+tmp <- read.delim(PATH_TO_POLE_MUTATIONS, sep='\t', header = T)
 tmp <- tmp[as.character(tmp$Effect)=='missense' & tmp$Gene=='POLE' & nchar(as.character(tmp$Protein))==7,]
 tmp <- tmp[as.numeric(substr(as.character(tmp$Protein),4,6)) < 472 & 
              as.numeric(substr(as.character(tmp$Protein),4,6)) > 267,]

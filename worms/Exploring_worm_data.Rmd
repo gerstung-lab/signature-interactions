@@ -6,11 +6,27 @@ output:
 ---
 
 Upload the sample annotations and mutation spectra.
-```{r}
+
+Libraries:
+```{r, eval=FALSE}
 library(ggplot2)
 library(openxlsx)
 library(reshape2)
 library(tsne)
+library(greta)
+library(bayesplot)
+library(MASS)
+library(beeswarm)
+library(vioplot)
+```
+```{r, echo=FALSE}
+library(ggplot2)
+library(openxlsx)
+library(reshape2)
+library(tsne)
+library(MASS)
+library(beeswarm)
+library(vioplot)
 ```
 Source some useful functions
 ```{r}
@@ -19,19 +35,25 @@ source('../plotting_functions.R')
 ```
 Upload the sample annotations
 ```{r}
-data <- openxlsx::read.xlsx(xlsxFile = "Supplementary Table 1. Sample description for C.elegans experiments.xlsx", sheet = 2, cols = 1:8)
+data <- openxlsx::read.xlsx(xlsxFile = "../Supplementary_tables/Supplement/Supplementary Table 1.xlsx", 
+                            sheet = 2, cols = 1:8, start = 2)
 data$Sample <- as.character(data$Sample)
 data$Genotype <- as.character(data$Genotype)
+```
+Create short annotations for samples:
+```{r}
 CD2Mutant <- sapply(1:nrow(data), function(i) {
   if (data$Type[i] == 'mut.acc.') return(paste0(data$Genotype[i],':',data$Generation[i]))
   return(paste0(data$Genotype[i],':',data$Mutagen[i],':',data$Drug.concentration[i]))
 })
 names(CD2Mutant) <- data$Sample
 CD2Mutant <- CD2Mutant[sort(names(CD2Mutant))]
+CD2Mutant[1:5]
 ```
 Upload the spectra
 ```{r}
-new.spectrum <- read.xlsx(xlsxFile = "Supplementary Table 1. Sample description for C.elegans experiments.xlsx", sheet = 3, rowNames = T)
+new.spectrum <- openxlsx::read.xlsx(xlsxFile = "../Supplementary_tables/Supplement/Supplementary Table 1.xlsx", 
+                          sheet = 3, rowNames = T, start = 2)
 CD2Mutant <- CD2Mutant[rownames(new.spectrum)] # remove reference worms
 data <- data[match(names(CD2Mutant),data$Sample),]
 head(new.spectrum[,1:10])
@@ -40,7 +62,7 @@ head(new.spectrum[,1:10])
 Make a tsne plot: aggregate replicates within experiment and plot only interesting experiments
 ```{r}
 Y <- new.spectrum
-CD2Mutant_tmp <- CD2Mutant[data$Drug.concentration > 0 | data$Generation > 3]
+CD2Mutant_tmp <- CD2Mutant[data$Drug.concentration > 0 | data$Generation > 1]
 experiments <- unique(CD2Mutant_tmp) # 552
 exp.set <- list()
 exp_number <- 1
@@ -270,6 +292,7 @@ p.ind <- ggplot(df.ind, aes(x=factor(name,levels = c(df.ind_median$name[df.ind_m
   geom_point(size = 0.1, col = "#8DD3C7", data = df.ind_median, mapping = aes(x = name, y = y)) +
   geom_hline(data = df.ind_median_global, aes(yintercept = y), size = 0.1)
 p.ind
+
 ```
 
 Visualize SVs
@@ -323,11 +346,11 @@ p.sv <- ggplot(df.sv, aes(x=factor(name,levels = c(df.sv_median$name[df.sv_media
 p.sv
 ```
 
-# How the full profiles look like
+Example of full mutational spectra:
 ```{r}
 clrs = c("#2EBAED","#000000","#DE1C14","#D4D2D2","#ADCC54","#F0D0CE","brown","#8DD3C7","goldenrod","#BEBADA","darkmagenta")
 inds <- c('CD0134a','CD0850j','CD0842d')
-plot_dnvhugesig_wb(t(Y[inds,]), colors = clrs, norm = F, diff_scale = T) + 
+plot_fullsig_wb(t(Y[inds,]), colors = clrs, norm = F, diff_scale = T) + 
   theme(panel.grid = element_blank())
 ```
 
@@ -340,15 +363,18 @@ model <- glm(y ~ x, family = stats::poisson(link = 'identity'), data = rad.data)
 coef(summary(model)) # Mutation rate of about 3.62 indel/SV mutations per 80 Gy
 ```
 
-
 # Making boxplots for number of mutations
 ```{r}
-z <-'polk-1:MMS' 
-tmp <- Y[rev(grep(z,CD2Mutant)),]
+
+tmp <- (Y[rev(grep('xpc-1:Cis',CD2Mutant[rownames(Y)])),])
+doses <- data$Drug.concentration[match(rownames(tmp),data$Sample)]
+tmp <- tmp[order(doses, decreasing = T),]
+doses <- doses[order(doses, decreasing = T)]
 f <- barplot(t(cbind(rowSums(tmp[,1:16]),rowSums(tmp[,17:32]),rowSums(tmp[,33:48]),
               rowSums(tmp[,49:64]),rowSums(tmp[,65:80]),rowSums(tmp[,81:96]),
               rowSums(tmp[,97:98]),rowSums(tmp[,99:104]),rowSums(tmp[,105:106]),
               rowSums(tmp[,107:112]),rowSums(tmp[,113:119]))), col = (clrs),
-        main = z, horiz = T, yaxt = 'n', xlim = c(0,700), border = NA)
-axis(side = 2, at = f, labels = data$Drug.concentration[rev(grep(z,CD2Mutant))], las = 2)
+        main = z, horiz = T, yaxt = 'n', xlim = c(0,100), border = NA)
+axis(side = 2, at = f, labels = doses, las = 2)
+
 ```

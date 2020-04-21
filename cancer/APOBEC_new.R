@@ -2,7 +2,7 @@
 
 library(VariantAnnotation)
 library(MASS)
-source('~/Desktop/Git/phd/useful_functions.R')
+source('../useful_functions.R')
 library(ggplot2)
 library(greta)
 library(reshape2)
@@ -14,9 +14,12 @@ indels <- c("D.1.5","D.5.50","D.50.400","DI.small","DI.large","I.1.5","I.5.50","
 new_cancer_signatures <- read.csv('sigProfiler_exome_SBS_signatures.csv')
 
 # Read in the matrix with mutation counts and with information on samples
-bigmat <- read.table('TCGA.caveman.matrix.dat',sep='\t')
+PATH_TO_TCGA_MATRIX='path_to_table_with_mutation_counts_for_TCGA'
+bigmat <- read.table(PATH_TO_TCGA_MATRIX,sep='\t')
 colnames(bigmat) <- c(types.full, indels)
-metadata <- read.table('TCGA_caveman_patients_to_files.dat', sep='\t', header=T)
+PATH_TO_METADATA='path_to_table_with_sample_names_and_projects_and_median_normalised_expression'
+metadata <- read.table(PATH_TO_METADATA, sep='\t', header=T)
+
 # restrictions
 bigmat <- bigmat[rowSums(bigmat[,1:96])>50 & rowSums(bigmat[,1:96]) < 10000,]
 colnames(bigmat) <- c(types.full, indels)
@@ -25,6 +28,10 @@ alternative_rownames_bigmat <- paste0('TCGA',substr(rownames(bigmat),5,nchar(row
 # select all samples similar to APOBEC profile
 all_apobecs <- alternative_rownames_bigmat[which(sapply(rownames(bigmat), function(x) cosine(as.numeric(bigmat[x,1:96]),
        new_cancer_signatures[,'SBS2'] + new_cancer_signatures[,'SBS13']))>0.8)]
+
+mutations_in_samples <- read.xlsx("Supplementary_Tables/Supplement/Supplementary Table 4.xlsx", sheet = 1, startRow = 2)
+genes = unique(sapply(mutations_in_samples$Mutated_genes, function(x) unlist(strsplit(x, split = ','))[1]))
+samples <- lapply(genes, function(x) unique(mutations_in_samples$Sample[grep(x, mutations_in_samples$Mutated_genes)]))
 
 # Check the fraction of C>A and C>G mutations versus C>T mutations in mutated/non-mutated samples (heterozygous+homozygous)
 REVUNG <- as.numeric(substr(all_apobecs,1,12) %in% c(samples[['REV1_hom']],samples[['UNG_hom']],

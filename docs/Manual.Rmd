@@ -1,0 +1,1169 @@
+---
+title: "Interaction analysis manual"
+author: "Nadia"
+date: "28/03/2020"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 1. Preparations.
+
+Upload the sample annotations and mutation spectra.
+
+Libraries:
+```{r, eval=FALSE}
+library(ggplot2)
+library(openxlsx)
+library(reshape2)
+library(tsne)
+library(greta)
+library(bayesplot)
+library(MASS)
+library(beeswarm)
+library(vioplot)
+```
+```{r, echo=FALSE}
+library(ggplot2)
+library(openxlsx)
+library(reshape2)
+library(tsne)
+library(MASS)
+library(beeswarm)
+library(vioplot)
+```
+Source some useful functions
+```{r}
+source('useful_functions.R')
+source('plotting_functions.R')
+```
+Upload the sample annotations
+```{r}
+data <- openxlsx::read.xlsx(xlsxFile = "Supplementary_tables/Supplement/Supplementary Table 1.xlsx", 
+                            sheet = 2, cols = 1:8, start = 2)
+data$Sample <- as.character(data$Sample)
+data$Genotype <- as.character(data$Genotype)
+```
+Create short annotations for samples:
+```{r}
+CD2Mutant <- sapply(1:nrow(data), function(i) {
+  if (data$Type[i] == 'mut.acc.') return(paste0(data$Genotype[i],':',data$Generation[i]))
+  return(paste0(data$Genotype[i],':',data$Mutagen[i],':',data$Drug.concentration[i]))
+})
+names(CD2Mutant) <- data$Sample
+CD2Mutant <- CD2Mutant[sort(names(CD2Mutant))]
+CD2Mutant[1:5]
+```
+Upload the spectra
+```{r}
+new.spectrum <- openxlsx::read.xlsx(xlsxFile = "Supplementary_tables/Supplement/Supplementary Table 1.xlsx", 
+                          sheet = 3, rowNames = T, start = 2)
+CD2Mutant <- CD2Mutant[rownames(new.spectrum)] # remove reference worms
+data <- data[match(names(CD2Mutant),data$Sample),]
+head(new.spectrum[,1:10])
+```
+
+# 2. Exploring C. elegans data.
+
+Make a tsne plot: aggregate replicates within experiment and plot only interesting experiments
+```{r}
+Y <- new.spectrum
+CD2Mutant_tmp <- CD2Mutant[data$Drug.concentration > 0 | data$Generation > 1]
+experiments <- unique(CD2Mutant_tmp) # 552
+exp.set <- list()
+exp_number <- 1
+for (k in experiments) {
+  ind <- which(CD2Mutant==k)
+  tab <- table(substr(names(ind),1,6))
+  good <- names(tab)
+  if (length(good)>0) {
+    for (g in good) {
+      exp.set[[exp_number]] <- ind[grep(g,names(ind))]
+      names(exp.set)[exp_number] <- paste0(k,'/',g)
+      exp_number <- exp_number+1
+    }
+  }
+}
+Ypathway <- t(sapply(exp.set, function(l) colSums(Y[l,,drop=F])))
+rownames(Ypathway) <- names(exp.set)
+x <- Ypathway
+# restrict number of mutations
+x <- x[rowSums(x)>20,] # 549 x 119
+
+cosdist <- function(x,y) {
+  return(1 - sum(x * y) / sqrt(sum(x**2)) / sqrt(sum(y**2)))
+}
+cosineM <- function(X) {
+  return(sapply(1:ncol(X), function(i) sapply(1:ncol(X), function(j) cosdist(X[,i], X[,j]))))
+}
+
+# cosine distance matrix
+D <- cosineM(t(x))
+set.seed(123456)
+t <- tsne(D, perplexity = 15)
+rownames(t) <- rownames(x)
+```
+
+Plot it
+```{r, echo = F}
+col_vector <- c(Aflatoxin = "gray",
+                AA = "gray48",
+                #AAI = "darkslategray",
+                #AAII = "gray",
+                #Ble = "#7ABADB",
+                Cis = "cornflowerblue",
+                #Cyclo = "chartreuse1",
+                DMS = "springgreen",
+                EMS = "darkgreen",
+                #Gly = "#80E8D4",
+                HU = "plum1",
+                Mech = "darkolivegreen1",
+                Mito= "lavender",
+                MMS = "springgreen3",
+                #Nitro = "mediumpurple1",
+                #Proton ="black",
+                Rad = "darkred", 
+                UV = 'darkorange', 
+                Xray = 'saddlebrown')
+df <- data.frame(mutagene = as.character(sapply(rownames(t), function(z)
+                    data$Mutagen[grep(unlist(strsplit(z,split='[/]'))[2], data$Sample)[1]])), 
+                 gene = as.character(sapply(rownames(t), function(z)
+                   data$Genotype[grep(unlist(strsplit(z,split='[/]'))[2], data$Sample)[1]])), 
+                 x = -t[,1], y = -t[,2], 
+                 number = rowSums(Ypathway[rownames(t),]) / sapply(rownames(t), function(z) length(exp.set[[z]])),
+                 name = sapply(rownames(t), function(z) 
+                   CD2Mutant[grep(unlist(strsplit(z,split='[/]'))[2],names(CD2Mutant))[1]]))
+df <- df[order(df$number, decreasing = T),] # order such that smallest dots are shown on top
+p <- ggplot(data = df, aes(x = x, y = y, fill = mutagene, size = number)) + 
+              geom_point(pch=21,col='black',stroke=0.5) +
+  scale_fill_manual(name = 'Mutagen', values = as.vector(col_vector)) + 
+  scale_size_continuous(range=c(1,20), name = 'No. of mutations', 
+                        breaks = c(100,1000,10000), labels = c(100,1000,10000))+
+  theme_bw() + 
+  theme(legend.position="none", 
+        panel.border = element_rect(colour='white'),
+        axis.text = element_blank(), 
+        axis.title= element_blank(),
+        axis.ticks = element_blank(),
+        line=element_blank(),
+        text = element_text(size=20)) +
+  guides(fill = guide_legend(override.aes = list(size=5)))
+p
+```
+
+Stability of experimental data: divide into replicates and check mean-variance relationship. Red - Poisson, Blue - negative binomial
+```{r, echo = F}
+means = vars = matrix(NA, nrow=length(exp.set), ncol=119)
+for (i in 1:length(exp.set)) {
+  means[i,] <- colMeans(Y[names(exp.set[[i]]),], na.rm=T)
+  vars[i,] <- apply(Y[names(exp.set[[i]]),], 2, var, na.rm = T)
+}
+
+k=120.786 # see separate Python script for estimating this value
+plot(as.vector(log(means)),as.vector(log(sqrt(vars)/means)),cex=0.5,pch=16, ylab='CV (log)', xlab = 'Expected value (log)')
+# Poisson
+points(log(seq(0,max(means,na.rm = T),0.01)),-log(seq(0,max(means,na.rm = T),0.01))/2,cex=0.5,pch=16,col='red')
+# Negative binomial
+points(log(seq(0,max(means,na.rm = T),0.01)),log(1 + seq(0,max(means,na.rm = T),0.01)/k)/2 - log(seq(0,max(means,na.rm = T),0.01))/2,cex=0.5,pch=16,col='blue')
+```
+
+
+Gather all mutations per sample
+```{r}
+mode <- sapply(CD2Mutant, function(z) {
+  mut <- unlist(strsplit(z,split='[:]'))
+  if (mut[2] %in% unique(data$Mutagen)) {
+    if (mut[1] == 'N2') return('Mutagen') else return('Interaction')
+  }
+  else return('MA')
+})
+
+df <- data.frame(number = c((log10(rowSums(Y)[mode == 'MA'])),
+                            (log10(rowSums(Y)[mode == 'Mutagen'])),
+                            (log10(rowSums(Y)[mode == 'Interaction']))),
+                 x = c(1:sum(mode == 'MA'),1:sum(mode == 'Mutagen'),1:sum(mode == 'Interaction')),
+                 name = CD2Mutant[names(c((log10(rowSums(Y)[mode == 'MA'])),
+                            (log10(rowSums(Y)[mode == 'Mutagen'])),
+                            (log10(rowSums(Y)[mode == 'Interaction']))))],
+                 real_name = names(c((log10(rowSums(Y)[mode == 'MA'])),
+                            (log10(rowSums(Y)[mode == 'Mutagen'])),
+                            (log10(rowSums(Y)[mode == 'Interaction'])))),
+                 mode = c(rep('MA',sum(mode == 'MA')),
+                          rep('Mutagen', sum(mode == 'Mutagen')),
+                          rep('Interaction', sum(mode == 'Interaction'))))
+```
+
+Visualize substitutions
+```{r,echo=F}
+df.sub <- df
+df.sub$number <- c((log10(rowSums(Y[,1:96])[mode == 'MA'])),
+               (log10(rowSums(Y[,1:96])[mode == 'Mutagen'])),
+               (log10(rowSums(Y[,1:96])[mode == 'Interaction'])))
+
+df.sub_median <- data.frame(y = c(sapply(unique(df.sub$name[df.sub$mode == 'MA']), function(x) 
+                                        mean(log10(rowSums(Y[CD2Mutant == x,1:96])))),
+                              sapply(unique(df.sub$name[df.sub$mode == 'Mutagen']), function(x) 
+                                        mean(log10(rowSums(Y[CD2Mutant == x,1:96])))),
+                              sapply(unique(df.sub$name[df.sub$mode == 'Interaction']), function(x) 
+                                        mean(log10(rowSums(Y[CD2Mutant == x,1:96]))))),
+                        name = c(unique(as.character(df.sub$name[df.sub$mode == 'MA'])),
+                                 unique(as.character(df.sub$name[df.sub$mode == 'Mutagen'])),
+                                 unique(as.character(df.sub$name[df.sub$mode == 'Interaction']))),
+                        mode = c(rep('MA',length(unique(df.sub$name[df.sub$mode == 'MA']))),
+                                 rep('Mutagen',length(unique(df.sub$name[df.sub$mode == 'Mutagen']))),
+                                 rep('Interaction',length(unique(df.sub$name[df.sub$mode == 'Interaction'])))),
+                        stringsAsFactors = F)
+df.sub_median <- df.sub_median[order(df.sub_median$y,decreasing = F),]
+
+df.sub_median_global <- data.frame(y = log10(c(median(10**df.sub_median$y[df.sub_median$mode == 'MA']),
+                                           median(10**df.sub_median$y[df.sub_median$mode == 'Mutagen']),
+                                           median(10**df.sub_median$y[df.sub_median$mode == 'Interaction']))),
+                                   mode = c('MA','Mutagen','Interaction'))
+
+
+p.sub <- ggplot(df.sub, aes(x=factor(name,levels = c(df.sub_median$name[df.sub_median$mode=='MA'],
+                                             df.sub_median$name[df.sub_median$mode=='Mutagen'],
+                                             df.sub_median$name[df.sub_median$mode=='Interaction'])),
+                             y=number)) + 
+  geom_point(size=0.05, col = 'gray86') +
+  theme_bw() +
+  theme(title = element_text(size = 8),
+        text = element_text(size = 8),
+        axis.ticks.x=element_blank(),
+        axis.text.x = element_blank(),
+        axis.ticks = element_line(size = 0.1),
+        axis.line.y = element_line(size=0.1),
+        strip.background=element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.grid.major = element_blank(),
+        panel.border = element_blank()) +
+    theme(plot.margin=grid::unit(c(1,2,1,1), "mm")) +
+  coord_cartesian(clip = "off") +
+  labs(x = 'Experiment', title = 'Substitutions') +
+  facet_grid(. ~ factor(mode,levels = c('MA','Mutagen','Interaction')), scales = "free_x", switch="x") +
+  scale_y_continuous(name="Mutations / sample", breaks = log10(c(c(1:9),c(1:9)*10,c(1:9)*100,1000,2000)),
+                     labels=c("1",rep('',8),"10",rep('',8),"100",rep('',8),"1000",''), limits=c(0,3.5)) +
+  geom_point(size = 0.1, col = 'black', data = df.sub_median, mapping = aes(x = name, y = y)) +
+  geom_hline(data = df.sub_median_global, aes(yintercept = y), size = 0.1)
+p.sub
+```
+
+Visualize indels
+```{r, echo = F}
+df.ind <- df
+df.ind$number <- c(log10(rowSums(Y[,99:112])[mode == 'MA']),
+               log10(rowSums(Y[,99:112])[mode == 'Mutagen']),
+               log10(rowSums(Y[,99:112])[mode == 'Interaction']))
+
+df.ind_median <- data.frame(y = c(sapply(unique(df.ind$name[df.ind$mode == 'MA']), function(x) log10(mean(rowSums(Y[CD2Mutant == x,99:112])))),
+                              sapply(unique(df.ind$name[df.ind$mode == 'Mutagen']), function(x) log10(mean(rowSums(Y[CD2Mutant == x,99:112])))),
+                              sapply(unique(df.ind$name[df.ind$mode == 'Interaction']), function(x) log10(mean(rowSums(Y[CD2Mutant == x,99:112]))))),
+                        name = c(unique(as.character(df.ind$name[df.ind$mode == 'MA'])),
+                                 unique(as.character(df.ind$name[df.ind$mode == 'Mutagen'])),
+                                 unique(as.character(df.ind$name[df.ind$mode == 'Interaction']))),
+                        mode = c(rep('MA',length(unique(df.ind$name[df.ind$mode == 'MA']))),
+                                 rep('Mutagen',length(unique(df.ind$name[df.ind$mode == 'Mutagen']))),
+                                 rep('Interaction',length(unique(df.ind$name[df.ind$mode == 'Interaction'])))),
+                        stringsAsFactors = F)
+df.ind_median <- df.ind_median[order(df.ind_median$y,decreasing = F),]
+
+df.ind_median_global <- data.frame(y = log10(c(median(10**df.ind_median$y[df.ind_median$mode == 'MA']),
+                                           median(10**df.ind_median$y[df.ind_median$mode == 'Mutagen']),
+                                           median(10**df.ind_median$y[df.ind_median$mode == 'Interaction']))), 
+                               mode = c('MA','Mutagen','Interaction'))
+
+
+p.ind <- ggplot(df.ind, aes(x=factor(name,levels = c(df.ind_median$name[df.ind_median$mode=='MA'],
+                                             df.ind_median$name[df.ind_median$mode=='Mutagen'],
+                                             df.ind_median$name[df.ind_median$mode=='Interaction'])),
+                             y=number)) + 
+  geom_point(size=0.05, col = 'gray86') +
+  theme_bw() +
+  theme(title = element_text(size = 8),
+        text = element_text(size = 8),
+        axis.ticks.x=element_blank(),
+        axis.text.x = element_blank(),
+        axis.ticks = element_line(size = 0.1),
+        axis.line.y = element_line(size=0.1),
+        strip.background=element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.grid.major = element_blank(),
+        panel.border = element_blank()) +
+    theme(plot.margin=grid::unit(c(1,1,1,1), "mm")) +
+  coord_cartesian(clip = "off") +
+  labs(x = 'Experiment', title = 'Indels') +
+  facet_grid(. ~ factor(mode,levels = c('MA','Mutagen','Interaction')), scales = "free_x",switch="x") +
+  scale_y_continuous(name="", breaks = log10(c(c(1:9),c(1:9)*10,c(1:9)*100,1000,2000)),
+                     labels=c("1",rep('',8),"10",rep('',8),"100",rep('',8),"1000",''), limits=c(0,3.5)) +
+  geom_point(size = 0.1, col = "#8DD3C7", data = df.ind_median, mapping = aes(x = name, y = y)) +
+  geom_hline(data = df.ind_median_global, aes(yintercept = y), size = 0.1)
+p.ind
+
+```
+
+Visualize SVs
+```{r, echo = F}
+df.sv <- df
+df.sv$number <- c(rowSums(Y[,113:119])[mode == 'MA'],
+                            rowSums(Y[,113:119])[mode == 'Mutagen'],
+                            rowSums(Y[,113:119])[mode == 'Interaction'])
+
+df.sv_median <- data.frame(y = c(sapply(unique(df.sv$name[df.sv$mode == 'MA']), function(x) mean(rowSums(Y[CD2Mutant == x,113:119]))),
+                              sapply(unique(df.sv$name[df.sv$mode == 'Mutagen']), function(x) mean(rowSums(Y[CD2Mutant == x,113:119]))),
+                              sapply(unique(df.sv$name[df.sv$mode == 'Interaction']), function(x) mean(rowSums(Y[CD2Mutant == x,113:119])))),
+                        name = c(unique(as.character(df.sv$name[df.sv$mode == 'MA'])),
+                                 unique(as.character(df.sv$name[df.sv$mode == 'Mutagen'])),
+                                 unique(as.character(df.sv$name[df.sv$mode == 'Interaction']))),
+                        mode = c(rep('MA',length(unique(df.sv$name[df.sv$mode == 'MA']))),
+                                 rep('Mutagen',length(unique(df.sv$name[df.sv$mode == 'Mutagen']))),
+                                 rep('Interaction',length(unique(df.sv$name[df.sv$mode == 'Interaction'])))),
+                        stringsAsFactors = F)
+df.sv_median <- df.sv_median[order(df.sv_median$y,decreasing = F),]
+
+df.sv_median_global <- data.frame(y = c(median(df.sv_median$y[df.sv_median$mode == 'MA']),
+                                     median(df.sv_median$y[df.sv_median$mode == 'Mutagen']),
+                                     median(df.sv_median$y[df.sv_median$mode == 'Interaction'])),
+                               mode = c('MA','Mutagen','Interaction'))
+
+
+p.sv <- ggplot(df.sv, aes(x=factor(name,levels = c(df.sv_median$name[df.sv_median$mode=='MA'],
+                                             df.sv_median$name[df.sv_median$mode=='Mutagen'],
+                                             df.sv_median$name[df.sv_median$mode=='Interaction'])),
+                             y=number)) + 
+  geom_point(size=0.05, col = 'gray86') +
+  theme_bw() +
+  theme(title = element_text(size = 8),
+        text = element_text(size = 8),
+        axis.ticks.x=element_blank(),
+        axis.text.x = element_blank(),
+        axis.ticks = element_line(size = 0.1),
+        axis.line.y = element_line(size=0.1),
+        strip.background=element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.grid.major = element_blank(),
+        panel.border = element_blank()) +
+  theme(plot.margin=grid::unit(c(1,1,1,2), "mm")) +
+  coord_cartesian(clip = "off") +
+  labs(x = 'Experiment', title = 'Structural variants') +
+  facet_grid(. ~ factor(mode,levels = c('MA','Mutagen','Interaction')), scales = "free_x",switch="x") +
+  scale_y_continuous(name="", breaks = c(0,2,4,6,8,10,12), limits=c(0,12)) +
+  geom_point(size = 0.1, col = "darkmagenta", data = df.sv_median, mapping = aes(x = name, y = y)) +
+    geom_hline(data = df.sv_median_global, aes(yintercept = y), size = 0.1)
+p.sv
+```
+
+Example of full mutational spectra:
+```{r}
+clrs = c("#2EBAED","#000000","#DE1C14","#D4D2D2","#ADCC54","#F0D0CE","brown","#8DD3C7","goldenrod","#BEBADA","darkmagenta")
+inds <- c('CD0134a','CD0850j','CD0842d')
+plot_fullsig_wb(t(Y[inds,]), colors = clrs, norm = F, diff_scale = T) + 
+  theme(panel.grid = element_blank())
+```
+
+# 3. Preparing the model
+
+Set the dimensions:
+```{r}
+m=119;p=54;r=12;s=196;n=nrow(Y)
+```
+
+Adjust generations for 25%/50%/25% pbty of a heterozygous mutation to be fixed/remain/lost:
+```{r}
+generation.function <- function(N) {
+  if (is.na(N)) return(N)
+  if (N==0) return(0)
+  if (N==1) return(1)
+  alpha = sum(sapply(1:N, function(i) 1/(2^(i-1)))) +
+    0.25*sum(sapply(1:(N-1), function(i) sum(sapply(1:i, function(j) 1/(2^(j-1))))))
+  return(alpha)
+}
+g = t(t(sapply(data$Generation,generation.function)))
+g[g[,1] == 0,1] <- 1 # set 1 because otherwise 0-generation worms will be excluded from the model, and they may matter
+```
+
+Specify doses:
+```{r}
+# raw dose
+doses <- data$Drug.concentration
+doses[is.na(doses)] <- 0 # for MA experiments, replace NA dose with 0
+```
+
+Make a design matrix with indicators for genotypes, mutagens and interactions:
+```{r}
+# Mutagens
+mutagens <- data$Mutagen
+mutagens[is.na(mutagens)] <- 'no'
+mutagens[mutagens=='MMS/EMS/DMS'] <- 'no' # N2 zero-exposure samples
+# Interactions
+interactions <- sapply(which(!is.na(data$Mutagen)), function(j) {
+  m <- as.character(data$Mutagen[j])
+  return(paste(data$Genotype[j],m,sep=":"))
+})
+names(interactions) <- data$Sample[which(!is.na(data$Mutagen))]
+# Put all together
+X <- data.frame(sapply(unique(data$Genotype), function(x) as.numeric(data$Genotype == x)),
+                sapply(unique(mutagens)[-1], function(x) as.numeric(mutagens == x)),
+                sapply(unique(interactions), function(x) sapply(rownames(Y), function(z) 
+                  ifelse(is.na(data$Mutagen[match(z,data$Sample)]), 0, as.numeric(interactions[z] == x))))) 
+rownames(X) <- data$Sample
+```
+
+Now we specify different indicator matrices. This one for genotypes:
+```{r}
+G <-  X[,1:p]
+G1 <- X[,1:p]
+```
+
+Then the one which describes any combination of genetic background and exposure to estimate the real generation number of worms used in exposure experiments:
+```{r}
+W2 <- X[,(p+r+1):ncol(X)]
+# Genotype per interaction matrix
+l = s + r
+zero_exposure_samples <- data$Sample[!is.na(data$Mutagen) & data$Drug.concentration==0]
+for (j in 1:length(zero_exposure_samples)) {
+  if (interactions[zero_exposure_samples[j]]=="N2:MMS/EMS/DMS")
+    next
+  colname <- interactions[zero_exposure_samples[j]]
+  colname <- gsub(x = colname, replacement = '.', pattern = '[ ]')
+  colname <- gsub(x = colname, replacement = '.', pattern = '[,]')
+  colname <- gsub(x = colname, replacement = '.', pattern = '[:]')
+  colname <- gsub(x = colname, replacement = '.', pattern = '[-]')
+  colname <- gsub(x = colname, replacement = '.', pattern = '[)]')
+  colname <- gsub(x = colname, replacement = '.', pattern = '[(]')
+  W2[match(zero_exposure_samples[j],data$Sample),colname] <- 1
+}
+if ("N2.MMS.EMS.DMS" %in% colnames(W2))
+  W2 <- W2[,-match("N2.MMS.EMS.DMS" , colnames(W2))]
+```
+
+And the one which indicated only the samples where we expect interactions (not MA, and not wild-type):
+```{r}
+X <- X[,-grep('N2.',colnames(X),fixed=T)]
+X <- X[,colSums(X)>0]
+W <- X[,(p+r+1):ncol(X)]
+```
+
+This one is the binary mutagen presence matrix:
+```{r}
+M1 <- X[,(p+1):(p+r)]
+M1[M1>0] <- 1
+```
+
+To improve mutagen effect estimation, we adjust mutagen doses so that their averages for all exposed samples is 1:
+```{r}
+Mall <- X[,(p+1):(p+r)] * doses
+avdose <- NULL
+for (j in 1:ncol(Mall)) {
+  avdose <- c(avdose, mean(Mall[Mall[,j]>0,j]))
+  Mall[,j] = Mall[,j] / mean(Mall[Mall[,j]>0,j])
+}
+names(avdose) <- colnames(Mall)
+# new doses
+doses = t(t(rowSums(Mall)))
+```
+
+Finally, we know that there are 5 batches of EMS samples, and would like to simultaneously identify the difference in average doses between them:
+```{r}
+EMS_batch <- as.numeric(data$Comments)
+EMS_batch[is.na(EMS_batch)] <- 0
+```
+
+# 4. Run the model
+
+## 4.1 Modelling the effects on the level of 11 mutation types
+
+First we make the matrix with high-level counts:
+```{r, eval = F}
+short.Y <- cbind(rowSums(Y[,1:16]),rowSums(Y[,17:32]),rowSums(Y[,33:48]),rowSums(Y[,49:64]),rowSums(Y[,65:80]),rowSums(Y[,81:96]),
+                 rowSums(Y[,97:98]),rowSums(Y[,99:104]),rowSums(Y[,105:106]),rowSums(Y[,107:112]),rowSums(Y[,113:119]))
+Y <- short.Y
+```
+
+Now specify the dimensions:
+```{r, eval = F}
+m = ncol(Y)
+r = ncol(Mall)
+n = nrow(Y)
+p = ncol(G1)
+```
+
+Start building the short model:
+```{r, eval = F}
+sigma_G <- gamma(shape = 1, rate = 1, dim = c(1,p))
+beta_GH <- lognormal(meanlog = matrix(0, nrow = m, ncol = p), sdlog = matrix(1, nrow = m, ncol = 1) %*% sigma_G, dim = c(m, p))
+
+sigma_M <- gamma(shape = 1, rate = 1, dim = c(1,r))
+beta_M = lognormal(meanlog = matrix(0,nrow = m,ncol=r), sdlog = matrix(1,nrow=m,ncol=1) %*% sigma_M, dim = c(m, r))
+
+# generations
+sigma_G = 0.5
+alpha_G = normal(mean=0, sd = sigma_G, dim = c(l,1), truncation = c(0,Inf))
+r_G = W2 %*% alpha_G
+
+# genotype aplification by mutagens
+sigma_G_M = 0.5
+alpha_G_M = normal(mean = 0, sd = sigma_G_M, dim=c(s,1), truncation = c(0,10))
+r_GM = W %*% alpha_G_M
+
+# EMS
+EMS_batch[EMS_batch==1] <- 0
+W_EMS <- matrix(0,nrow = n, ncol = 4)
+for (j in 1:4)
+  W_EMS[which(EMS_batch == j+1),j] <- 1
+EMS_dose_adjustment = normal(mean = 0, sd = 0.5, dim = c(4,1))
+r_doses = exp(W_EMS %*% EMS_dose_adjustment)
+
+# Interactions
+sigma2_I_2 = gamma(shape = 1, rate = 1, dim = c(1,s))
+beta_I_all = greta::laplace(matrix(0, nrow = m, ncol = s),
+			    sigma = matrix(1,nrow=m,ncol=1) %*% sigma2_I_2)
+
+# Model
+mu_GH = as.matrix(G1) %*% t(beta_GH)
+mu_M = M1 %*% t(beta_M)
+mu1 = exp(W %*% t(beta_I_all)) 
+mu =  mu_GH * ((g + r_G + (doses * r_doses)*r_GM) %*% matrix(1,nrow=1,ncol=m)) + (mu1 * mu_M) * ((doses * r_doses) %*% matrix(1,nrow=1,ncol=m))
+prob = size / (size + mu)
+distribution(Y) = negative_binomial(size = size, prob = prob)
+
+model_full <- model(beta_GH, beta_M, beta_I_all, alpha_G, alpha_G_M, EMS_dose_adjustment, sigma_M)
+draws.step1 <- mcmc(model_full, warmup = 2000, n_samples = 2000)
+draws_all <- do.call('rbind',draws.step1)
+
+beta_I_short <- matrix(colMeans(draws_all[,grep('beta_I',colnames(draws.step2[[1]]))]), nrow = m, ncol = s)
+beta_I_short_var <- matrix(apply(draws_all[,grep('beta_I',colnames(draws.step2[[1]]))],2,var), nrow = m, ncol = s)
+beta_I_short_low <- matrix(apply(draws_all[,grep('beta_I',colnames(draws.step2[[1]]))],2,quantile,0.025), nrow = m, ncol = s)
+beta_I_short_high <- matrix(apply(draws_all[,grep('beta_I',colnames(draws.step2[[1]]))],2,quantile,0.975), nrow = m, ncol = s)
+colnames(beta_I_short) = colnames(beta_I_short_var) = colnames(beta_I_short_low) = colnames(beta_I_short_high) = colnames(W)
+```
+
+From this procedure, we will get mutaiton type-wide interaction effects $beta_I_short$.
+
+## 4.2 Estimating genetic contributions from MA samples
+
+Select only MA samples
+```{r, eval = F}
+ma.samples <- data$Sample[is.na(data$Mutagen) & data$Generation>0]
+ma.X <- X[ma.samples,] * sapply(data$Generation[match(ma.samples, data$Sample)],generation.function)
+ma.X <- ma.X[,colSums(ma.X)>0]
+ma.Y <- Y[ma.samples,]
+```
+
+Specify the model
+```{r, eval = F}
+sigma_GH <- variable(lower = 0)
+beta_GH = lognormal(meanlog = 0, sdlog = sigma_GH, dim = c(m, ncol(ma.X))) # lognormal with fitted variance
+mu_GH = (ma.X %*% t(beta_GH))
+size = 100
+prob = size / (size + mu_GH)
+distribution(ma.Y) = negative_binomial(prob = prob, size = size * matrix(1,nrow = nrow(ma.Y), ncol = ncol(ma.Y)))
+ma.model <- model(beta_GH,sigma_GH)
+```
+
+Now run the MCMC procedure
+```{r, eval = F}
+ma.draws <- mcmc(ma.model, warmup = 2000, n_samples = 5000, thin = 2) # takes a lot of memory and time - better do on HPC
+```
+
+Convergence diagnostics:
+```{r, eval = F}
+mcmc_trace(ma.draws[,grep('beta_GH',colnames(ma.draws[[1]]))[sample(1:(m*ncol(ma.X)),9)]])
+mcmc_trace(ma.draws[,grep('sigma_GH',colnames(ma.draws[[1]])),drop=F])
+```
+
+Now define the values inferred from sampling:
+```{r, eval = F}
+beta_GH_greta <- matrix(colMeans((do.call('rbind',ma.draws)[,grep('beta_GH',colnames(ma.draws[[1]]))])), nrow = m, ncol = ncol(ma.X))
+beta_GH_greta_low <- matrix(apply((do.call('rbind',ma.draws)[,grep('beta_GH',colnames(ma.draws[[1]]))]),2,quantile,0.025), nrow = m, ncol = ncol(ma.X))
+beta_GH_greta_high <- matrix(apply((do.call('rbind',ma.draws)[,grep('beta_GH',colnames(ma.draws[[1]]))]),2,quantile,0.975), nrow = m, ncol = ncol(ma.X))
+beta_GH_greta_var <- matrix(apply((do.call('rbind',ma.draws)[,grep('beta_GH',colnames(ma.draws[[1]]))]),2,var), nrow = m, ncol = ncol(ma.X))
+colnames(beta_GH_greta) = colnames(beta_GH_greta_low) = colnames(beta_GH_greta_high) =colnames(beta_GH_greta_var) <- colnames(ma.X)
+```
+
+## 4.3 Estimate mutagen contributions and interactions.
+
+In the second model, the values of MA experiments will go in as gamma priors; for the cases without MA, we will assume same prior as for N2.
+```{r, eval = F}
+beta.draws <- do.call('rbind',ma.draws)[,grep('beta_GH',colnames(ma.draws[[1]]))]
+shapes <- matrix(sapply(1:ncol(beta.draws), function(i) { print(i); return(fitdistr(beta.draws[,i],'gamma')[[1]][1]) }), nrow = 119, ncol = 51)
+rates <- matrix(sapply(1:ncol(beta.draws), function(i) { print(i); return(fitdistr(beta.draws[,i],'gamma')[[1]][2]) }), nrow = 119, ncol = 51)
+# now feed these priors into the full genotypes structure
+new_shapes <- matrix(1,nrow = 119, ncol = ncol(G1))
+new_rates <- matrix(1,nrow = 119, ncol = ncol(G1))
+for (j in 1:ncol(G1)) {
+  if (colnames(G1)[j] %in% colnames(ma.X)) {
+    new_shapes[,j] <- shapes[,match(colnames(G1)[j],colnames(ma.X))]
+    new_rates[,j] <- rates[,match(colnames(G1)[j],colnames(ma.X))]
+  }
+  else {
+    new_shapes[,j] <- shapes[,match('N2',colnames(ma.X))]
+    new_rates[,j] <- rates[,match('N2',colnames(ma.X))]
+  }
+}
+# Gamma priors fitted to posterior samples from Step 1
+beta_GH <- gamma(shape = new_shapes, rate = new_rates, dim = c(m, ncol(G1)))
+```
+
+Specify mutagen signatures:
+```{r, eval = F}
+sigma_M <- gamma(shape = 1, rate = 1, dim = c(1,r))
+beta_M = lognormal(meanlog = matrix(0,nrow = m,ncol=r), sdlog = matrix(1,nrow=m,ncol=1) %*% sigma_M, dim = c(m, ncol(Mall)))
+```
+
+Now we define the adjustment of generations (account for the fact that mutagen exposure samples are not necessarily 1st generation after knockout / after splitting them and their mates with different exposure dose):
+```{r, eval = F}
+sigma_G = 0.5
+alpha_G = lognormal(mean = 0, sd=sigma_G, truncation = c(0,Inf), dim = c(l,1))
+r_G = W2 %*% alpha_G
+```
+
+Dose adjusment for EMS mixed batches:
+```{r, eval = F}
+W_EMS <- matrix(0,nrow = n, ncol = 4) # 5 batches total, so 4 adjustments
+for (j in 1:ncol(W_EMS))
+  W_EMS[which(EMS_batch == j+1),j] <- 1
+EMS_dose_adjustment = normal(mean = 0, sd = 0.5, dim = c(4,1))
+r_doses = exp(W_EMS %*% EMS_dose_adjustment)
+```
+
+Defining the parameters to account for the genotype aplification by mutagens:
+```{r, eval = F}
+sigma_G_M = 0.5
+alpha_G_M = lognormal(mean = 0, sd=sigma_G_M, truncation = c(0,Inf), dim=c(s,1))
+r_GM = W %*% alpha_G_M
+```
+
+Interaction term - regularized
+```{r, eval = F}
+linemat <- function(n1,n2,l) {
+  tmptmp <- matrix(0,nrow=n1,ncol=n2)
+  tmptmp[l,] <- 1
+  return(tmptmp)
+}
+tmp = cbind(linemat(11,16,1),linemat(11,16,2),linemat(11,16,3),linemat(11,16,4),linemat(11,16,5),linemat(11,16,6),
+            linemat(11,2,7),linemat(11,6,8),linemat(11,2,8),linemat(11,6,8),linemat(11,7,9))
+
+sigma2_I_2 = variable(lower = 0, upper = 10, dim= c(1,s))
+beta_I_all = greta::laplace(mu = t(tmp) %*% beta_I_greta_full,
+			    sigma = matrix(1,nrow=m,ncol=1) %*% sigma2_I_2)
+```
+
+Bring everything together:
+```{r, eval = F}
+mu_GH = as.matrix(G1) %*% t(beta_GH) # genetic background
+M1 <- Mall>0
+mu_M = as.matrix(M1) %*% t(beta_M) # mutagen contribution
+mu1 = exp(as.matrix(W) %*% t(beta_I_2)) # multiplicative genotype - mutation interaction
+mu =  mu_GH * ((g + r_G + (r_doses*doses) * r_GM) %*% matrix(1,nrow=1,ncol=m)) +
+  mu1 * mu_M * ((doses*r_doses) %*% matrix(1,nrow=1,ncol=m))
+size = 100 # account for a bit of overdispersion
+prob = size / (size + mu)
+distribution(Y) = negative_binomial(size = size, prob = prob) # fit negative binomial distribution to the counts
+model_full <- model(beta_M, beta_GH, sigma_M, beta_I_2, sigma2_I_2, beta_GH, alpha_G, alpha_G_M, EMS_dose_adjustment) 
+```
+
+Estimate the effects with MCMC:
+```{r, eval = F}
+draws <- mcmc(model_full, warmup = 2000, n_samples = 5000, thin = 2)
+```
+
+Some convergence diagnostics:
+```{r, eval = F}
+mcmc_trace(draws[,grep('beta_M',colnames(draws[[1]]))[sample(1:(r*m),16)]])
+mcmc_trace(draws[,grep('beta_I',colnames(draws[[1]]))[sample(1:(s*m),16)]])
+mcmc_trace(draws[,grep('alpha_G',colnames(draws[[1]]))[sample(1:l,16)]])
+mcmc_trace(draws[,grep('alpha_G_M',colnames(draws[[1]]))[sample(1:s,16)]])
+mcmc_trace(draws[,grep('sigma2_I_2',colnames(draws[[1]]))[sample(1:s,16)],drop=F])
+mcmc_trace(draws[,grep('sigma_M',colnames(draws[[1]])),drop=F])
+mcmc_trace(draws[,grep('EMS',colnames(draws[[1]]))[sample(1:sum(EMS_unknown_batch),16)]])
+```
+
+Extract point estimates for each parameter:
+```{r, eval = F}
+draws_all <- do.call('rbind',draws)
+alpha_G_greta <- colMeans(draws_all[,grep('alpha_G',colnames(draws_all))[1:l]])
+alpha_G_greta_low <- apply(draws_all[,grep('alpha_G',colnames(draws_all))[1:l]],2,quantile,0.025)
+alpha_G_greta_high <- apply(draws_all[,grep('alpha_G',colnames(draws_all))[1:l]],2,quantile,0.975)
+alpha_GM_greta <- colMeans(draws_all[,grep('alpha_G_M',colnames(draws_all))])
+alpha_GM_greta_low <- apply(draws_all[,grep('alpha_G_M',colnames(draws_all))],2,quantile,0.025)
+alpha_GM_greta_high <- apply(draws_all[,grep('alpha_G_M',colnames(draws_all))],2,quantile,0.975)
+alpha_GM_greta_var <- apply(draws_all[,grep('alpha_G_M',colnames(draws_all))],2,var)
+
+beta_GH_greta_full <- matrix(colMeans(exp(draws_all[,grep('beta_GH',colnames(draws_all))])), nrow = m, ncol = p)
+beta_GH_greta_full_var <- matrix(apply(exp(draws_all[,grep('beta_GH',colnames(draws_all))]),2,var), nrow = m, ncol = p)
+beta_GH_greta_full_low <- matrix(apply(exp(draws_all[,grep('beta_GH',colnames(draws_all))]),2,quantile,0.025), nrow = m, ncol = p)
+beta_GH_greta_full_high <- matrix(apply(exp(draws_all[,grep('beta_GH',colnames(draws_all))]),2,quantile,0.975), nrow = m, ncol = p)
+colnames(beta_GH_greta_full) <- colnames(G1)
+colnames(beta_GH_greta_full_low) <- colnames(G1)
+colnames(beta_GH_greta_full_high) <- colnames(G1)
+
+beta_M_greta_full <- matrix(colMeans(draws_all[,grep('beta_M',colnames(draws_all))]), nrow = m, ncol = r)
+beta_M_greta_full_var <- matrix(apply(draws_all[,grep('beta_M',colnames(draws_all))],2,var), nrow = m, ncol = r)
+beta_M_greta_full_low <- matrix(apply(draws_all[,grep('beta_M',colnames(draws_all))],2,quantile,0.025), nrow = m, ncol = r)
+beta_M_greta_full_high <- matrix(apply(draws_all[,grep('beta_M',colnames(draws_all))],2,quantile,0.975), nrow = m, ncol = r)
+
+colnames(beta_M_greta_full) = colnames(beta_M_greta_full_var) = colnames(beta_M_greta_full_high) = colnames(beta_M_greta_full_low) = colnames(Mall)
+
+beta_I_greta_full <- matrix(colMeans(draws_all[,grep('beta_I',colnames(draws_all))]), nrow = m, ncol = s)
+beta_I_greta_full_var <- matrix(apply(draws_all[,grep('beta_I',colnames(draws_all))],2,var), nrow = m, ncol = s)
+beta_I_greta_full_low <- matrix(apply(draws_all[,grep('beta_I',colnames(draws_all))],2,quantile,0.025), nrow = m, ncol = s)
+beta_I_greta_full_high <- matrix(apply(draws_all[,grep('beta_I',colnames(draws_all))],2,quantile,0.975), nrow = m, ncol = s)
+
+colnames(beta_I_greta_full) = colnames(beta_I_greta_full_var)=colnames(beta_I_greta_full_low) = colnames(beta_I_greta_full_high) = colnames(W)
+
+EMS_dose_adjustment_greta = colMeans(draws_all[,grep('EMS',colnames(draws.step2[[1]]))])
+EMS_dose_adjustment_greta_low = apply(draws_all[,grep('EMS',colnames(draws.step2[[1]]))],2,quantile,0.025)
+EMS_dose_adjustment_greta_high = apply(draws_all[,grep('EMS',colnames(draws.step2[[1]]))],2,quantile,0.975)
+```
+
+Check the quality of fit
+```{r, eval = F}
+mu <- (as.matrix(G1) %*% t((beta_GH_greta_full))) * 
+  ((g + as.matrix(W2) %*% t(t(alpha_G_greta)) + (doses * exp(W_EMS %*% t(t(EMS_dose_adjustment_greta)))) * (as.matrix(W) %*% t(t(alpha_GM_greta)))) 
+   %*% matrix(1,nrow = 1,ncol=119)) +
+  (as.matrix(M1) %*% t((beta_M_greta_full))) * exp(as.matrix(W) %*% t(beta_I_greta_full)) *
+  ((doses * exp(W_EMS %*% t(t(EMS_dose_adjustment_greta)))) %*% matrix(1,nrow = 1,ncol=119))
+plot(rowSums(Y), rowSums(mu),pch = 16)
+abline(a=0,b=1,col='red')
+```
+
+All the code above takes a while to run on the cluster, so for further analysis, I'll upload the estimates:
+```{r}
+load('worms/Pre-calculated/Coefficients_from_full_model.RData')
+```
+Or get them from the suptables:
+```{r, eval = F}
+beta_GH_greta_full <- read.xlsx("Supplementary_Tables/Supplement/Supplementary Table 2.xlsx", sheet = 1, startRow = 2)
+beta_GH_greta_high <- read.xlsx("Supplementary_Tables/Supplement/Supplementary Table 2.xlsx", sheet = 2, startRow = 2)
+beta_GH_greta_low <- read.xlsx("Supplementary_Tables/Supplement/Supplementary Table 2.xlsx", sheet = 3, startRow = 2)
+beta_M_greta_full <- read.xlsx("Supplementary_Tables/Supplement/Supplementary Table 2.xlsx", sheet = 4, startRow = 2)
+beta_M_greta_high <- read.xlsx("Supplementary_Tables/Supplement/Supplementary Table 2.xlsx", sheet = 5, startRow = 2)
+beta_M_greta_low <- read.xlsx("Supplementary_Tables/Supplement/Supplementary Table 2.xlsx", sheet = 6, startRow = 2)
+beta_I_greta_full <- read.xlsx("Supplementary_Tables/Supplement/Supplementary Table 3.xlsx", sheet = 1, startRow = 2)
+beta_I_greta_high <- read.xlsx("Supplementary_Tables/Supplement/Supplementary Table 3.xlsx", sheet = 2, startRow = 2)
+beta_I_greta_low <- read.xlsx("Supplementary_Tables/Supplement/Supplementary Table 3.xlsx", sheet = 3, startRow = 2)
+alpha_G_greta <- read.xlsx("Supplementary_Tables/Supplement/Supplementary Table 2.xlsx", sheet = 7, startRow = 2, rowNames = T)[,1]
+alpha_G_greta_low <- read.xlsx("Supplementary_Tables/Supplement/Supplementary Table 2.xlsx", sheet = 7, startRow = 2, rowNames = T)[,2]
+alpha_G_greta_high <- read.xlsx("Supplementary_Tables/Supplement/Supplementary Table 2.xlsx", sheet = 7, startRow = 2, rowNames = T)[,3]
+alpha_GM_greta <- read.xlsx("Supplementary_Tables/Supplement/Supplementary Table 3.xlsx", sheet = 4, startRow = 2, rowNames = T)[,1]
+alpha_GM_greta_low <- read.xlsx("Supplementary_Tables/Supplement/Supplementary Table 3.xlsx", sheet = 4, startRow = 2, rowNames = T)[,2]
+alpha_GM_greta_high <- read.xlsx("Supplementary_Tables/Supplement/Supplementary Table 3.xlsx", sheet = 4, startRow = 2, rowNames = T)[,3]
+EMS_dose_adjustment_greta <- read.xlsx("Supplementary_Tables/Supplement/Supplementary Table 2.xlsx", sheet = 8, startRow = 2, rowNames = T)[,1]
+EMS_dose_adjustment_greta_low <- read.xlsx("Supplementary_Tables/Supplement/Supplementary Table 2.xlsx", sheet = 8, startRow = 2, rowNames = T)[,2]
+EMS_dose_adjustment_greta_high <- read.xlsx("Supplementary_Tables/Supplement/Supplementary Table 2.xlsx", sheet = 8, startRow = 2, rowNames = T)[,3]
+```
+
+# 5. Visualising the signatures and interaction effects, and testing their significance
+
+Visualise some effects:
+
+Dose dependent genotype amplification coefficient
+```{r}
+par(mar = c(8,4,2,2))
+foo <- barplot(t(alpha_GM_greta)[order(alpha_GM_greta)], ylim = c(0,max(alpha_GM_greta_high)),col = 'white')
+axis(side = 1, at = foo, labels = colnames(W)[order(alpha_GM_greta)], cex.axis = 0.4, las = 2)
+arrows(x0 = foo, y0 = t(alpha_GM_greta_low)[order(alpha_GM_greta)], y1 = t(alpha_GM_greta_high)[order(alpha_GM_greta)], col ='darkgrey', length=0.01, lwd=2, angle=90)
+```
+
+Additional generation per sample 
+```{r}
+par(mar = c(8,4,2,2))
+foo <- barplot(t(alpha_G_greta)[order(alpha_G_greta)], ylim = c(0,max(alpha_G_greta_high)),col = 'white')
+axis(side = 1, at = foo, labels = colnames(W2)[order(alpha_G_greta)], cex.axis = 0.4, las = 2)
+arrows(x0 = foo, y0 = t(alpha_G_greta_low)[order(alpha_G_greta)], y1 = t(alpha_G_greta_high)[order(alpha_G_greta)], col ='darkgrey', length=0.01, lwd=2, angle=90)
+```
+
+Examples of DNA repair deficiency signatures
+```{r}
+clrs = c("#2EBAED","#000000","#DE1C14","#D4D2D2","#ADCC54","#F0D0CE","brown","#8DD3C7","goldenrod","#BEBADA","darkmagenta")
+plot_fullsig_wb((beta_GH_greta_full[,1:10]), CI=T, col = clrs, 
+                   low = (beta_GH_greta_full_low[,1:10]),
+                   high = (beta_GH_greta_full_high[,1:10]), norm = F)
+```
+
+Examples of mutagen induced signatures
+```{r}
+plot_fullsig_wb((beta_M_greta_full),CI=T, col = clrs, 
+                   low = (beta_M_greta_full_low), high = (beta_M_greta_full_high),
+                   ymax = 0.3)
+```
+
+We will be visualising the effects including both beta_I and b_I (dose-dependent genotype amplification effect). Here we will also use the estimates from mutation type-wise model:
+```{r}
+load('worms/Pre-calculated/Coefficients_from_short_model.RData')
+alternative_I_short <- beta_I_greta_full
+alternative_I_low_short <- beta_I_greta_full_low
+alternative_I_high_short <- beta_I_greta_full_high
+alternative_I_var_short <- beta_I_greta_full_var
+for (z in colnames(W)) {
+  back.g <- colnames(G1)[which(G1[rownames(W)[which(W[,z]>0)][1],]>0)]
+  back.m <- colnames(Mall)[which(Mall[rownames(W)[which(W[,z]>0)],]>0,arr.ind=T)[1,2]]
+  prof_0 <- t((beta_GH_greta_full[,back.g,drop = F])) + t((beta_M_greta_full[,back.m]))
+  prof_1 <- t((beta_GH_greta_full[,back.g,drop = F]))*(1+alpha_GM_greta_var[match(z,colnames(W))]) + 
+    t((beta_M_greta_full[,back.m])) * t(exp(beta_I_greta_full[,z]))
+  alternative_I_short[,z] <- log(prof_1 / prof_0)
+  prof_var <- t((beta_GH_greta_full)[,back.g,drop = F])**2 * (alpha_GM_greta_var[match(z,colnames(W))]) + 
+    t((beta_M_greta_full[,back.m]))**2 * t(exp(beta_I_greta_full[,z])) * t(beta_I_greta_full_var[,z])
+  alternative_I_var_short[,z] <- prof_var / prof_1**2
+  alternative_I_low_short[,z] <- alternative_I_short[,z] - 1.96 * sqrt(alternative_I_var_short[,z]) 
+  alternative_I_high_short[,z] <- alternative_I_short[,z] + 1.96 * sqrt(alternative_I_var_short[,z]) 
+}
+
+load('worms/Pre-calculated/Coefficients_from_full_model.RData')
+alternative_I <- beta_I_greta_full
+alternative_I_low <- beta_I_greta_full_low
+alternative_I_high <- beta_I_greta_full_high
+alternative_I_var <- beta_I_greta_full_var
+for (z in colnames(W)) {
+  back.g <- colnames(G1)[which(G1[rownames(W)[which(W[,z]>0)][1],]>0)]
+  back.m <- colnames(Mall)[which(Mall[rownames(W)[which(W[,z]>0)],]>0,arr.ind=T)[1,2]]
+  prof_0 <- t((beta_GH_greta_full[,back.g,drop = F])) + t((beta_M_greta_full[,back.m]))
+  prof_1 <- t((beta_GH_greta_full[,back.g,drop = F]))*(1+alpha_GM_greta_var[match(z,colnames(W))]) + 
+    t((beta_M_greta_full[,back.m])) * t(exp(beta_I_greta_full[,z]))
+  alternative_I[,z] <- log(prof_1 / prof_0)
+  
+  prof_var <- t((beta_GH_greta_full)[,back.g,drop = F])**2 * (alpha_GM_greta_var[match(z,colnames(W))]) + 
+    t((beta_M_greta_full[,back.m]))**2 * t(exp(beta_I_greta_full[,z])) * t(beta_I_greta_full_var[,z])
+  alternative_I_var[,z] <- prof_var / prof_1**2
+  alternative_I_low[,z] <- alternative_I[,z] - 1.96 * sqrt(alternative_I_var[,z]) 
+  alternative_I_high[,z] <- alternative_I[,z] + 1.96 * sqrt(alternative_I_var[,z]) 
+}
+```
+
+Visualising just mutagen-based interaction effects:
+```{r}
+z = 'agt.1.MMS'
+par(mar = c(2, 4, 4, 2) + 0.1)
+current_at <- c(-1,0,1,2)
+interaction_effect_plot(beta_I_greta_full[,z], CI = T, at = current_at,
+                        low = beta_I_greta_full_low[,z],
+                        high = beta_I_greta_full_high[,z], plot_main = z, cex = 2, lwd = 2, lwd.means = 4)
+```
+
+Visualising full interaction effects:
+
+```{r}
+z = 'agt.1.MMS'
+par(mar = c(2, 4, 4, 2) + 0.1)
+current_at <- c(-1,0,1,2)
+current_labels <- c('<0.1',1,10,100)
+means_tmp <- data.frame(x = alternative_I_short[,z],
+                        low = alternative_I_low_short[,z],
+                        high = alternative_I_high_short[,z])
+means_tmp[means_tmp < log(0.1)] <- log(0.1)
+interaction_effect_plot(alternative_I[,z], at = current_at, labels = current_labels, CI = T,
+                        low = alternative_I_low[,z],
+                        high = alternative_I_high[,z],
+                        plot_main = paste0('Effects for ', z),
+                        cex = 2, cex.main = 2, lwd = 1, lwd.means = 4, means = means_tmp$x, means_low = means_tmp$low, means_high = means_tmp$high)
+```
+
+Visualizing actual signatures:
+```{r}
+unit <- c(1, 10, 10, 100, 0.1, 100, 1, 10, 1, 100, 10, 1)
+#  1 microM, 10 microM, 10 microM, 100 Gray, 100 microM, 100 Gray, 1 mM, 10 milliM, 1 mM, 100 Joule, 10 microM, 1 mM 
+names(unit) = names(avdose) <- colnames(Mall)
+z <- 'agt.1.MMS' # put any interaction here
+zg = paste(unlist(strsplit(z,split='[.]'))[1:2],collapse='.')
+if (substr(zg,1,3) == 'bub') {
+  zg <- substr(z,1,13)
+}
+if (substr(zg,1,5) == 'rad.T') {
+  zg <- substr(z,1,15)
+}
+zm = unlist(strsplit(z,split='[.]'))[length(unlist(strsplit(z,split='[.]')))]
+if (zm == 'B1') zm <- 'Aflatoxin.B1'
+tmp <- data.frame(v1 = beta_M_greta_full[,zm] / avdose[zm] * unit[zm],
+                  v2 = beta_GH_greta_full[,zg,drop = F]*(alpha_GM_greta[match(z,colnames(W))] / avdose[zm] * unit[zm]) + 
+                    beta_M_greta_full[,zm] * exp(beta_I_greta_full[,z]) * unit[zm] / avdose[zm])
+colnames(tmp) <- c(zm,z)
+tmp_var <- data.frame(v1 = beta_M_greta_full_var[,zm] * (unit[zm] / avdose[zm])**2,
+                      v2 = beta_GH_greta_full[,zg,drop = F]**2 * (unit[zm] / avdose[zm])**2 * (alpha_GM_greta_var[match(z,colnames(W))]) + 
+                          (unit[zm] / avdose[zm])**2 * beta_M_greta_full[,zm]**2 * exp(beta_I_greta_full[,z]) * beta_I_greta_full_var[,z])
+tmp_low <- tmp - 1.96*sqrt(tmp_var)
+tmp_high <- tmp + 1.96*sqrt(tmp_var)
+tmp_low[tmp_low<0] <- 0
+q2 <- plot_fullsig_wb(tmp, CI = T, low = tmp_low, high = tmp_high, ymax = max(tmp_high), norm = F, colors = clrs, diff_scale = F) + theme(panel.grid = element_blank())
+print(q2)
+```
+
+Quantifying the contributions from different factor groups:
+
+```{r}
+mu <- (as.matrix(G1) %*% t((beta_GH_greta_full))) * ((g + as.matrix(W2) %*% t(t(alpha_G_greta)) + 
+                                                 doses * (as.matrix(W) %*% t(t(alpha_GM_greta)))) %*% matrix(1,nrow = 1,ncol=119)) + 
+  (as.matrix(Mall) %*% t((beta_M_greta_full))) * exp(as.matrix(W) %*% t(beta_I_greta_full))
+
+genetic_cont <- (as.matrix(G1) %*% t((beta_GH_greta_full))) * ((g + as.matrix(W2) %*% t(t(alpha_G_greta))) %*% matrix(1,nrow = 1,ncol=119))
+genmut_cont <- (as.matrix(G1) %*% t((beta_GH_greta_full))) * ((doses * (as.matrix(W) %*% t(t(alpha_GM_greta)))) %*% matrix(1,nrow = 1,ncol=119))
+matrix_of_dif <- as.matrix(Mall) %*% t((beta_M_greta_full)) * exp(as.matrix(W) %*% t(beta_I_greta_full)) - as.matrix(Mall) %*% t((beta_M_greta_full)) + genmut_cont
+#par(mar = c(8,5,5,5))
+f <- barplot(c(sum(rowSums(genetic_cont)[rowSums(W)>0]), 
+               sum(rowSums(as.matrix(Mall) %*% t((beta_M_greta_full)))[rowSums(W)>0]), 
+               sum(matrix_of_dif[matrix_of_dif>0]),
+               sum(matrix_of_dif[matrix_of_dif<0])),
+             main = 'Mutations attributed to different factors',
+             col = c('palegreen3', 'skyblue', 'lightpink', 'darksalmon'),
+             names.arg = c('Endogenous\n processes', 'Exogenous\n mutagens', 'Interactions+','Interactions-'),
+             ylim = c(-20000,100000),
+             las = 2, yaxt = 'n', border = NA)
+
+axis(side = 2, at = c(-10000,0,20000,50000,100000), labels = c(-10,0,20,50,100), las = 2)
+text(x = as.vector(f), y = c(sum(rowSums(genetic_cont)[rowSums(W)>0]), 
+                             sum(rowSums(as.matrix(Mall) %*% t((beta_M_greta_full)))[rowSums(W)>0]), 
+                             sum(matrix_of_dif[matrix_of_dif>0]),0) + 1000,
+     labels = c(paste0(100*round(sum(rowSums(genetic_cont)[rowSums(W)>0]) / 
+                                   sum(rowSums(mu)[rowSums(W)>0]),2), ' %'),
+                paste0(100*round(sum(rowSums(as.matrix(Mall) %*% t((beta_M_greta_full)))[rowSums(W)>0]) / sum(rowSums(mu)[rowSums(W)>0]),2), ' %'),
+                paste0(100*round(sum(matrix_of_dif[matrix_of_dif>0]) / sum(rowSums(mu)[rowSums(W)>0]),2), ' %'),
+                paste0(100*round(sum(matrix_of_dif[matrix_of_dif<0]) / sum(rowSums(mu)[rowSums(W)>0]),2), ' %')),
+     pos = 3, col = "black")
+```
+
+To measure the fold-changes in the number of mutations and the change in mutational spectrum, we utilise the MCMC $draws$ from the model in step 3. Here we use the draws from the short model for assessing fold-changes in numbers, and from the full model for assessing the changes in spectrum. In both cases, the lists of changes in each draw are acquired using the same procedure explained in this code chunk. Doing this is computationally demanding, so below I will use pre-calculated sets of changes.
+
+```{r, eval = F}
+changes <- list()
+similarities <- list()
+k <- 1
+for (j in 1:2000) {
+  beta_GH_greta_full_tmp <- matrix(as.matrix(draws[j,grep('beta_G',colnames(draws))]), nrow = m, ncol = p)
+  beta_M_greta_full_tmp <- matrix(as.matrix(draws[j,grep('beta_M',colnames(draws))]), nrow = m, ncol = r)
+  alpha_GM_greta_tmp <- as.matrix(draws[j,grep('alpha_G_M',colnames(draws))])
+  beta_I_greta_full_tmp <- matrix(as.matrix(draws[j,grep('beta_I',colnames(draws))]), nrow = m, ncol = s)
+  changes[[k]] <- rep(NA,ncol(W))
+  names(changes[[k]]) <- colnames(W)
+  similarities[[k]] <- rep(NA,ncol(W))
+  names(similarities[[k]]) <- colnames(W)
+  for (z in colnames(W)) {
+    zg = paste(unlist(strsplit(z,split='[.]'))[1:2],collapse='.')
+    if (substr(zg,1,3) == 'bub') {
+      zg <- substr(z,1,13)
+    }
+    if (substr(zg,1,5) == 'rad.T') {
+      zg <- substr(z,1,15)
+    }
+    zm = unlist(strsplit(z,split='[.]'))[length(unlist(strsplit(z,split='[.]')))]
+    if (zm == 'B1') zm <- 'Aflatoxin.B1'
+    # Mutations expected without interactions
+    mu_0 <- beta_GH_greta_full_tmp[,match(zg,colnames(beta_GH_greta_full))] + 
+      beta_M_greta_full_tmp[,match(zm,colnames(beta_M_greta_full))] / avdose[zm] * unit[zm]
+    # Mutations expected with interactions
+    mu_1 <- beta_GH_greta_full_tmp[,match(zg,colnames(beta_GH_greta_full))] * 
+      (1 + alpha_GM_greta_tmp[match(z,colnames(W)),] / avdose[zm] * unit[zm]) +
+      beta_M_greta_full_tmp[,match(zm,colnames(beta_M_greta_full))] * 
+      exp(beta_I_greta_full_tmp[,match(z,colnames(beta_I_greta_full))]) / avdose[zm] * unit[zm]
+    changes[[k]][z] <- (sum(mu_1) / sum(mu_0))
+    similarities[[k]][z] <- cosine(mu_0, mu_1)
+  }
+  k <- k + 1
+  print(k)
+}
+```
+
+Now load the pre-calculated draws and plot the changes using short model (as the signal for total mutation numbers is stronger):
+```{r}
+load('worms/Pre-calculated/Fold_change_draws_from_short_model.RData')
+par(mar = c(6,4,2,2))
+X_axis <- c(1:s)
+interesting_interactions <- NULL
+
+for (i in 1:3) {
+
+  if (i == 1)   changes <- changes_subs
+  if (i == 2)   changes <- changes_indels
+  if (i == 3)   changes <- changes_sv
+  sds <- apply(changes,1,sd)
+  low <- apply(changes,1,quantile,0.025)
+  high <- apply(changes,1,quantile,0.975)
+  means <- apply(changes,1,mean)
+
+  sapply(names(means), function(x) paste0(unlist(strsplit(x,split="[.]"))[-c(1:2)], collapse = '.')) -> mutagen_names
+  mutagen_names[mutagen_names == ".gt3312..Radiation"] <- "Radiation"
+  mutagen_names[mutagen_names == ".gt2000..Radiation"] <- "Radiation"
+  mutagen_names[mutagen_names == ".ok3437..Radiation"] <- "Radiation"
+  mutagen_names[mutagen_names == ".gt3308..Radiation"] <- "Radiation"
+
+  o <- order(means); mutagen_names <- mutagen_names[o]
+  o <- do.call('c', split(o, mutagen_names)[c(8,4,5,2,1,10,11,9,3,6,7)])
+  means <- means[o]; low <- low[o]; high <- high[o]
+  
+  sapply(names(means), function(x) {
+    zscore = log(means[x]) / (sds[x] / means[x])
+    return(1 - pchisq(q = zscore**2, df = 1))
+  }) -> pv
+  pv <- p.adjust(pv,method='BH')
+  interesting_interactions <- unique(c(interesting_interactions, names(means)[pv<0.05]))
+
+  if (i == 1) upper_lim <- 50
+  if ( i == 2) upper_lim <- 20
+  if (i == 3) upper_lim <- 20
+  
+  par(mar = c(10,4,4,4))
+
+  plot(x = X_axis, xaxt = 'n', y = rep(NA,length(X_axis)), ylim = c(log10(0.1),log10(upper_lim)), 
+     yaxt = 'n', xlab = '', ylab = '', bty='n', main = 'Foldchange')
+  for (j in 1:length(X_axis)) {
+    cur.col <- 'gray88'; cur.lwd = 1
+    if (pv[j] < 0.05) {
+      cur.col <- 'gray48'
+      cur.lwd <- 2
+    }
+    polygon(x = c(X_axis[j] - 0.5,rep(X_axis[j] + 0.5,2),rep(X_axis[j] - 0.5,2)),
+            y = c(rep(log10(high[j]),2),rep(log10(low[j]),2),log10(high[j])),
+            col = cur.col,
+            border = 0.01)
+    lines(x = c(X_axis[j] - 0.5, X_axis[j] + 0.5), y = rep(log10(means[j]),2), lwd = cur.lwd)
+  }
+  abline(h = log10(1), lty = 2)
+  abline(h = 1, lty = 2)
+
+  axis(side = 2, labels = c(0.1,0.5,1,2,5,c(1:(upper_lim/10))*10), at = log10(c(0.1,0.5,1,2,5,c(1:(upper_lim/10))*10)),las = 2)
+  axis(side = 1, 
+       labels = names(means),
+       at = X_axis,
+       las=2, cex.axis = 0.5)
+}
+```
+
+Visualize the similarity of profiles, this time - using the draws from full model.
+P.S. The estimate for the change in the mutational spectrum between DMS exposure in wildtype and in exo-3 varied a lot between different runs of the model, hence we removed it from the final list of significant interactions.
+```{r}
+load('worms/Pre-calculated/Change_draws_from_full_model.RData')
+
+sds <- apply(similarities,1,sd)
+low <- apply(1-similarities,1,quantile,0.025)
+high <- apply(1-similarities,1,quantile,0.975)
+means <- apply(1-similarities,1,mean)
+
+sapply(names(means), function(x) paste0(unlist(strsplit(x,split="[.]"))[-c(1:2)], collapse = '.')) -> mutagen_names
+mutagen_names[mutagen_names == ".gt3312..Radiation"] <- "Radiation"
+mutagen_names[mutagen_names == ".gt2000..Radiation"] <- "Radiation"
+mutagen_names[mutagen_names == ".ok3437..Radiation"] <- "Radiation"
+mutagen_names[mutagen_names == ".gt3308..Radiation"] <- "Radiation"
+
+o <- order(means)
+mutagen_names <- mutagen_names[o]
+o <- do.call('c', split(o, mutagen_names)[c(8,4,5,2,1,10,11,9,3,6,7)])
+means <- means[o]
+low <- low[o]
+high <- high[o]
+X_axis <- c(1:length(means))
+
+par(mar = c(2,4,2,2))
+plot(x = X_axis, xaxt = 'n', y = rep(NA,length(X_axis)),
+     yaxt = 'n', ylim = c(0,1), xlab = 'Experiment', ylab = 'Similarity',
+     bty='n', main = 'Similarities to the profile without interactions')
+
+for (j in 1:length(X_axis)) {
+  cur.col <- 'lightsteelblue1'; cur.lwd = 1
+  if (low[j] > 0.2) {
+    cur.col <- 'skyblue4'
+    cur.lwd <- 2
+  }
+  polygon(x = c(X_axis[j] - 0.5,rep(X_axis[j] + 0.5,2),rep(X_axis[j] - 0.5,2)),
+          y = c(rep(high[j],2),rep(low[j],2),high[j]),
+          col = cur.col,
+          border = 0.01)
+  lines(x = c(X_axis[j] - 0.5, X_axis[j] + 0.5), y = rep(means[j],2), lwd = cur.lwd)
+}
+abline(h = 0, lty = 2)
+axis(side = 2, labels = c(0,0.2,0.4,0.6), at = c(0,0.2,0.4,0.6),las = 2)
+```
+
+Mutations prevented/induced by different repair/tolerance factors for a single genotoxin:
+```{r}
+# Example - MMS:
+
+sds <- apply(changes_subs,1,sd)
+means <- apply(changes_subs,1,mean)
+mms <- data.frame(subs = means[c('xpc.1.MMS','xpf.1.MMS','xpa.1.MMS','polk.1.MMS','rev.3.MMS','agt.1.MMS')], 
+                  subs_sds = sds[c('xpc.1.MMS','xpf.1.MMS','xpa.1.MMS','polk.1.MMS','rev.3.MMS','agt.1.MMS')])
+
+mms$indels_sds <- as.numeric(apply(changes_indels,1,sd)[c('xpc.1.MMS','xpf.1.MMS','xpa.1.MMS','polk.1.MMS','rev.3.MMS','agt.1.MMS')])
+mms$indels <- as.numeric(apply(changes_indels,1,mean)[c('xpc.1.MMS','xpf.1.MMS','xpa.1.MMS','polk.1.MMS','rev.3.MMS','agt.1.MMS')])
+
+mms$sv_sds <- as.numeric(apply(changes_sv,1,sd)[c('xpc.1.MMS','xpf.1.MMS','xpa.1.MMS','polk.1.MMS','rev.3.MMS','agt.1.MMS')])
+mms$sv <- as.numeric(apply(changes_sv,1,mean)[c('xpc.1.MMS','xpf.1.MMS','xpa.1.MMS','polk.1.MMS','rev.3.MMS','agt.1.MMS')])
+
+mms$subs_sds[mms$subs>1] <- (1/mms$subs[mms$subs>1])**2 * 100 *mms$subs_sds[mms$subs>1]
+mms$subs_sds[mms$subs<1] <- 100 *mms$subs_sds[mms$subs<1]
+mms$subs[mms$subs>1] <- -(1 - 1/mms$subs[mms$subs>1]) * 100
+mms$subs[mms$subs<1 & mms$subs>0] <- (1 - mms$subs[mms$subs<1 & mms$subs>0]) * 100
+
+mms$indels_sds[mms$indels>1] <- (1/mms$indels[mms$indels>1])**2 * 100 *mms$indels_sds[mms$indels>1]
+mms$indels_sds[mms$indels<1] <- 100 *mms$indels_sds[mms$indels<1]
+mms$indels[mms$indels>1] <- -(1 - 1/mms$indels[mms$indels>1]) * 100
+mms$indels[mms$indels<1 & mms$indels>0] <- (1 - mms$indels[mms$indels<1 & mms$indels>0]) * 100
+
+mms$sv_sds[mms$sv>1] <- (1/mms$sv[mms$sv>1])**2 * 100 *mms$sv_sds[mms$sv>1]
+mms$sv_sds[mms$sv<1] <- 100 *mms$sv_sds[mms$sv<1]
+mms$sv[mms$sv>1] <- -(1 - 1/mms$sv[mms$sv>1]) * 100
+mms$sv[mms$sv<1 & mms$sv > 0] <- (1 - mms$sv[mms$sv<1 & mms$sv > 0]) * 100
+
+
+par(mar = c(8,4,2,2))
+f <- barplot(t(mms[,c(1,4,6)]), xaxt = 'n', yaxt = 'n', beside = T,col = c(clrs[7], clrs[8], clrs[11]), border = NA,
+             main = '', ylim = c(-120,120))
+axis(side = 2, at = c(20*c(-5:5)), las = 2)
+axis(side = 1, at = f[2,], labels = c('XPC-1','XPF-1','XPA-1','POLK-1','REV-3','AGT-1'), las = 2, lty = 0)
+arrows(x0 = f[1,], y0 = mms$subs - 1.96*mms$subs_sds, y1 =  mms$subs + 1.96*mms$subs_sds,
+       col = 'black', length=0, lwd=2, angle=90)
+arrows(x0 = f[2,], y0 = mms$indels - 1.96*mms$indels_sds, y1 =  mms$indels + 1.96*mms$indels_sds,
+       col = 'black', length=0, lwd=2, angle=90)
+arrows(x0 = f[3,], y0 = mms$sv - 1.96*mms$sv_sds, y1 =  mms$sv + 1.96*mms$sv_sds,
+       col = 'black', length=0, lwd=2, angle=90)
+legend('topright', fill = c(clrs[7], clrs[8], clrs[11]), border = F, bty = 'n', legend = c('SBs','Indels','SVs'), cex = 1.5)
+```
+
+Similarly for a DNA repair protein across genotoxins:
+```{r}
+# Example for REV-3
+
+sds <- apply(changes_subs,1,sd)
+means <- apply(changes_subs,1,mean)
+rev3 <- data.frame(subs = means[grep('rev.3',names(means))], subs_sds = sds[grep('rev.3',names(means))])
+
+rev3$indels_sds <- as.numeric(apply(changes_indels,1,sd)[grep('rev.3',names(means))])
+rev3$indels <- as.numeric(apply(changes_indels,1,mean)[grep('rev.3',names(means))])
+
+rev3$sv_sds <- as.numeric(apply(changes_sv,1,sd)[grep('rev.3',names(means))])
+rev3$sv <- as.numeric(apply(changes_sv,1,mean)[grep('rev.3',names(means))])
+
+rev3$subs_sds[rev3$subs>1] <- (1/rev3$subs[rev3$subs>1])**2 * 100 *rev3$subs_sds[rev3$subs>1]
+rev3$subs_sds[rev3$subs<1] <- 100 *rev3$subs_sds[rev3$subs<1]
+rev3$subs[rev3$subs>1] <- -(1 - 1/rev3$subs[rev3$subs>1]) * 100
+rev3$subs[rev3$subs<1 & rev3$subs>0] <- (1 - rev3$subs[rev3$subs<1 & rev3$subs>0]) * 100
+
+rev3$indels_sds[rev3$indels>1] <- (1/rev3$indels[rev3$indels>1])**2 * 100 *rev3$indels_sds[rev3$indels>1]
+rev3$indels_sds[rev3$indels<1] <- 100 *rev3$indels_sds[rev3$indels<1]
+rev3$indels[rev3$indels>1] <- -(1 - 1/rev3$indels[rev3$indels>1]) * 100
+rev3$indels[rev3$indels<1 & rev3$indels>0] <- (1 - rev3$indels[rev3$indels<1 & rev3$indels>0]) * 100
+
+rev3$sv_sds[rev3$sv>1] <- (1/rev3$sv[rev3$sv>1])**2 * 100 *rev3$sv_sds[rev3$sv>1]
+rev3$sv_sds[rev3$sv<1] <- 100 *rev3$sv_sds[rev3$sv<1]
+rev3$sv[rev3$sv>1] <- -(1 - 1/rev3$sv[rev3$sv>1]) * 100
+rev3$sv[rev3$sv<1 & rev3$sv > 0] <- (1 - rev3$sv[rev3$sv<1 & rev3$sv > 0]) * 100
+
+rev3 <- rev3[order(mutagen_names[grep('rev.3',names(means))]),]
+
+par(mar = c(8,4,2,2))
+f <- barplot(t(rev3[,c(1,4,6)]), border = NA,
+             xaxt = 'n', yaxt = 'n', beside = T,col = c(clrs[7], clrs[8], clrs[11]),
+             main = '% of substitutions contributed by REV-3', ylim = c(-120,120))
+axis(side = 2, at = c(20*c(-5:5)), las = 2)
+axis(side = 1, at = f[2,], labels = sort(mutagen_names[grep('rev.3',names(means))]), las = 2, lty = 0)
+arrows(x0 = f[1,], y0 = rev3$subs - 1.96*rev3$subs_sds, y1 =  rev3$subs + 1.96*rev3$subs_sds,
+       col = 'black', length=0, lwd=2, angle=90)
+arrows(x0 = f[2,], y0 = rev3$indels - 1.96*rev3$indels_sds, y1 =  rev3$indels + 1.96*rev3$indels_sds,
+       col = 'black', length=0, lwd=2, angle=90)
+arrows(x0 = f[3,], y0 = rev3$sv - 1.96*rev3$sv_sds, y1 =  rev3$sv + 1.96*rev3$sv_sds,
+       col = 'black', length=0, lwd=2, angle=90)
+legend('top', fill = c(clrs[7], clrs[8], clrs[11]), border = F, bty = 'n', legend = c('SBs','Indels','SVs'), cex = 1.3)
+
+```

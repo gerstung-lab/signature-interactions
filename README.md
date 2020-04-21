@@ -1,8 +1,28 @@
-# signature-interactions
-Codes and data for the manuscript "Mutational signatures are jointly shaped by DNA damage and repair"
-(to be submitted in June 2019)
+# Codes accompanying *Mutational signatures are jointly shaped by DNA damage and repair*
 
-Human analysis part requires a matrix with TCGA variants, and a metadata matrix with sample names, cancer types, and FPKM expression values for DNA repair genes.
+Codes and data for the manuscript "Mutational signatures are jointly shaped by DNA damage and repair" (accepted in Nature Communications 2020). `R-markdown` report is available at https://nvolkova.github.io/signature-interactions/ .
+
+## Contents:
+
+### worms
+Codes and pre-calculated data to filter and classify mutations in *C. elegans* data and calculate the contributions of DNA repair and genotoxins to mutational spectra.
+
+### cancer
+Codes for analysing DNA damage-repair interactions in human cancers. Catalogues mutations in DNA repair genes, quantifies selection with dNdS analysis. This part requires a matrix with TCGA variants, and a metadata matrix with sample names, cancer types, and FPKM expression values for DNA repair genes.
+
+### Supplementary_tables
+
+Tables with signatures and interaction coefficients for *C. elegans* analysis, as well as with DNA repair genes and their mutations and selective pressure across TCGA samples.
+
+### comparison
+
+Compares genotoxin signatures in human cancers (as per COSMIC catalogue) and *C. elegans*.
+
+### docs
+
+Materials for `rmarkdown` report.
+
+## R session information
 
 Session information for the analyses:
 

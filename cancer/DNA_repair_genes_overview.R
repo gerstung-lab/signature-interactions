@@ -5,7 +5,7 @@ library(TxDb.Hsapiens.UCSC.hg19.knownGene)
 library(openxlsx)
 source('../useful_functions.R')
 
-genes <- openxlsx::read.xlsx('Supplementary Table 4. TCGA samples with mutations in DNA pathways.xlsx', sheet = 2)
+genes <- openxlsx::read.xlsx('../Supplementary_tables/Supplement/Supplementary Table 4. TCGA samples with mutations in DNA pathways.xlsx', sheet = 1)
 # Get the new signature set from here: https://www.synapse.org/#!Synapse:syn11967914
 new_cancer_signatures <- read.csv('sigProfiler_exome_SBS_signatures.csv')
 
@@ -38,11 +38,15 @@ names(ALL_odd) <- ALL_alt
 transcr <- txs[ALL_odd]
 
 
-bigmat <- read.table('TCGA.caveman.matrix.dat',sep='\t')
-metadata <- read.table('TCGA_caveman_patients_to_files.dat', sep='\t', header=T)
+PATH_TO_TCGA_MATRIX='path_to_table_with_mutation_counts_for_TCGA'
+bigmat <- read.table(PATH_TO_TCGA_MATRIX,sep='\t')
+
+PATH_TO_METADATA='path_to_table_with_sample_names_and_projects_and_median_normalised_expression'
+metadata <- read.table(PATH_TO_METADATA, sep='\t', header=T)
 
 # Need the copy number segments for all samples from TCGA
-copynumber <- read.delim('filtered.combined.segments.txt', sep = '\t', header = T)
+PATH_TO_COPYNUMBER_FOR_TCGA='path_to_table_with_copynumbers_in_samples'
+copynumber <- read.delim(PATH_TO_COPYNUMBER_FOR_TCGA, sep = '\t', header = T)
 colnames(copynumber) <- c('Tissue','Sample','Chromosome','Start','End','MajorCN','MinorCN','Cancer_type')
 copynumber <- GRanges(copynumber)
 seqlevels(copynumber) <- paste0('chr',seqlevels(copynumber))
@@ -164,12 +168,15 @@ samples <- lapply(samples, function(l) l[l %in% substr(alternative_rownames_bigm
 one_copy_list <- lapply(one_copy_list, function(l) l[l %in% substr(alternative_rownames_bigmat,1,12)])
 sapply(samples,length)
 
-save(samples, file = 'DNA_repair_defects_list.RData')
 
 #########################################3
 
-bigmat <- read.table('TCGA.caveman.matrix.dat',sep='\t',header=T)
-metadata <- read.table('TCGA_caveman_patients_to_files.dat',sep='\t',header=T)
+PATH_TO_TCGA_MATRIX='path_to_table_with_mutation_counts_for_TCGA'
+bigmat <- read.table(PATH_TO_TCGA_MATRIX,sep='\t')
+
+PATH_TO_METADATA='path_to_table_with_sample_names_and_projects_and_median_normalised_expression'
+metadata <- read.table(PATH_TO_METADATA, sep='\t', header=T)
+
 types.full <- paste(rep(rep(c('A','C','G','T'), each = 4), 6), '[', rep(c('C','T'), each = 48), '>', rep(c('A','G','T','A','C','G'), each=16), ']', rep(c('A','C','G','T'), 24), sep='')
 bigmat <- bigmat[rowSums(bigmat)<20000 & rowSums(bigmat) > 50,]
 alternative_rownames_bigmat <- paste0('TCGA', substr(rownames(bigmat),5,nchar(rownames(bigmat))))

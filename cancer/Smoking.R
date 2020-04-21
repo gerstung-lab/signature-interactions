@@ -21,17 +21,22 @@ indels <- c("D.1.5","D.5.50","D.50.400","DI.small","DI.large","I.1.5","I.5.50","
 # Get the new signature set from here: https://www.synapse.org/#!Synapse:syn11967914
 new_cancer_signatures <- read.csv('sigProfiler_exome_SBS_signatures.csv')
 
-bigmat <- read.table('TCGA.caveman.matrix.dat',sep='\t')
+mutations_in_samples <- read.xlsx("Supplementary_Tables/Supplement/Supplementary Table 4.xlsx", sheet = 1, startRow = 2)
+samples <- lapply(c(NER.core, TLS.core), function(x) unique(mutations_in_samples$Sample[grep(x, mutations_in_samples$Mutated_genes)]))
+
+PATH_TO_TCGA_MATRIX='path_to_table_with_mutation_counts_for_TCGA'
+bigmat <- read.table(PATH_TO_TCGA_MATRIX,sep='\t')
 rownames(bigmat) <- paste0('TCGA',substr(rownames(bigmat),5,nchar(rownames(bigmat))))
-metadata <- read.table('TCGA_caveman_patients_to_files.dat', sep='\t', header=T)
+PATH_TO_METADATA='path_to_table_with_sample_names_and_projects_and_median_normalised_expression'
+metadata <- read.table(PATH_TO_METADATA, sep='\t', header=T)
 
 lung <- metadata$tumour[metadata$project %in% c('LUAD','LUSC')]
 lung <- lung[which(sapply(match(lung,alternative_rownames_bigmat), function(x) cosine(as.numeric(bigmat[x,1:96]), new_cancer_signatures[,'SBS4'])) > 0.8)]
 lung.mut.mat <- bigmat[match(lung,rownames(bigmat)),]
 
 # Pull together
-X <- data.frame(NER = as.numeric(substr(lung,1,12) %in% unlist(samples[c(paste0(NER.core,'_hom'),paste0(NER.core,'_het'))])),
-                TLS = as.numeric(substr(lung,1,12) %in% unlist(samples[c(paste0(TLS.core,'_hom'),paste0(TLS.core,'_het'))])))
+X <- data.frame(NER = as.numeric(substr(lung,1,12) %in% unlist(samples[NER.core])),
+                TLS = as.numeric(substr(lung,1,12) %in% unlist(samples[TLS.core])))
 
 lung_data <- list(
   N = nrow(lung.mut.mat),
@@ -65,8 +70,6 @@ m <- model(S,E,beta)
 
 # sampling
 draws <- mcmc(m, n_samples = 500, warmup = 500, chains = 4)
-save(lung_data, draws, file = '~/LUNG_sampling_norm_29042019.RData')
-#save(draws, file = '~/lung_sampling_norm_08012019.RData')
 
 # Visualize the draws
 library(bayesplot)

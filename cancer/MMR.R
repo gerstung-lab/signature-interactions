@@ -19,8 +19,11 @@ indels <- c("D.1.5","D.5.50","D.50.400","DI.small","DI.large","I.1.5","I.5.50","
 # Get the new signature set from here: https://www.synapse.org/#!Synapse:syn11967914
 new_cancer_signatures <- read.csv('sigProfiler_exome_SBS_signatures.csv')
 
-bigmat <- read.table('TCGA.caveman.matrix.dat',sep='\t')
-metadata <- read.table('TCGA_caveman_patients_to_files.dat', sep='\t', header=T)
+PATH_TO_TCGA_MATRIX='path_to_table_with_mutation_counts_for_TCGA'
+bigmat <- read.table(PATH_TO_TCGA_MATRIX,sep='\t')
+
+PATH_TO_METADATA='path_to_table_with_sample_names_and_projects_and_median_normalised_expression'
+metadata <- read.table(PATH_TO_METADATA, sep='\t', header=T)
 rownames(bigmat) <- paste0('TCGA', substr(rownames(bigmat), 5,nchar(rownames(bigmat))))
 
 # MSI status for TCGA from TCGA Clinical Explorer
@@ -35,9 +38,10 @@ msi_status = data.frame(sample = do.call('c', lapply(status, function(x) as.char
 mmr.genes <- c('MLH1','PMS2','MSH2','MSH3','MSH6')
 #mmr.genes <- MMR.core[-6]
 
+mutations_in_samples <- read.xlsx("Supplementary_Tables/Supplement/Supplementary Table 4.xlsx", sheet = 1, startRow = 2)
+samples <- lapply(ner.genes, function(x) unique(mutations_in_samples$Sample[grep(x, mutations_in_samples$Mutated_genes)]))
 
-new.mmr <- unique(c(as.character(unlist(samples[paste0(mmr.genes,'_hom')])),
-             as.character(unlist(samples[paste0(mmr.genes,'_het')])),
+new.mmr <- unique(c(as.character(unlist(samples[mmr.genes])),
              as.character(msi_status$sample[msi_status$MSI == 'MSI-H'])))
 new.mmr <- alternative_rownames_bigmat[substr(alternative_rownames_bigmat,1,12) %in% new.mmr |
                                          alternative_rownames_bigmat %in% new.mmr]
@@ -168,7 +172,6 @@ plot_subindel_wb(new_altered_signatures, CI = T, low = new_altered_signatures - 
 
 
 
-bigmat <- read.table('TCGA.caveman.matrix.dat',sep='\t')
 bigmat <- bigmat[rowSums(bigmat) < 20000 & rowSums(bigmat) > 100,]
 alternative_rownames_bigmat <- paste0('TCGA',substr(rownames(bigmat),5,nchar(rownames(bigmat))))
 
@@ -185,6 +188,7 @@ mean_ins <- list()
 mean_ins_sd <- list()
 mmr_mean_ins <- list()
 mmr_mean_ins_sd <- list()
+ids <- read.table('~/Downloads/ICGCtoTCGA.tsv', sep = '\t', header = T)
 age <- ids$donor_age_at_diagnosis[match(substr(alternative_rownames_bigmat,1,12),ids$submitted_donor_id)]
 ctype <- sapply(alternative_rownames_bigmat, function(x) metadata$project[match(x,metadata$tumour)])
 for (proj in c('COAD','BRCA','CESC','HNSC','STAD','LIHC','LUSC','PRAD','UCEC')) {

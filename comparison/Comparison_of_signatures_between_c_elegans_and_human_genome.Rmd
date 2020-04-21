@@ -1,0 +1,262 @@
+---
+title: "Comparing the signatures between worms and cancers"
+output: html_notebook
+---
+
+```{r}
+library(deconstructSigs)
+library(BSgenome)
+library(BSgenome.Celegans.UCSC.ce11)
+library(BSgenome.Hsapiens.UCSC.hg19)
+human_genome <- 'BSgenome.Hsapiens.UCSC.hg19'
+source('~/Mutation accumulation/dnarepairdefiiencies/plotting_functions.R')
+source('~/Desktop/Git/phd/useful_functions.R')
+```
+
+
+These are the latest COSMIC signatures from COSMIC website:
+
+```{r}
+sbs_cancer_signatures <- read.csv('~/Downloads/sigProfiler_SBS_signatures.csv')[,3:67]
+dbs_cancer_signatures <- read.csv('~/Downloads/sigProfiler_DBS_signatures.csv', row.names = 1)
+id_cancer_signatures <- read.csv('~/Downloads/sigProfiler_ID_signatures.csv', row.names = 1)
+```
+
+Some SBS signatures:
+
+```{r}
+plot_sig_wb(sbs_cancer_signatures[,c('SBS4','SBS29')])
+```
+
+Some DNV signatures:
+
+```{r}
+plot_id_only(dbs_cancer_signatures[,c('DBS1','DBS2')])
+```
+
+Adjusting the worm trinucleotide context to human genome:
+
+```{r}
+library(deconstructSigs)
+genome <- 'BSgenome.Celegans.UCSC.ce11'
+genome.seq <- getSeq(get(genome))[-7]
+worm.trinucleotides <- colSums(trinucleotideFrequency(genome.seq))
+human.trinucleotides <- as.vector(t(tri.counts.genome)) # / sum(tri.counts.genome))) # counts from "deconstructSigs" package
+names(human.trinucleotides) <- row.names(tri.counts.genome)
+trinucleotide.freq.factor <- sapply(unique(types), function(x) {
+  freq.worm <- worm.trinucleotides[x] + worm.trinucleotides[as.character(reverseComplement(DNAString(x)))]
+  return(freq.worm /  human.trinucleotides[x]) # tri.counts.genome is already classified w.r.t. pyrimidine reference
+})
+names(trinucleotide.freq.factor) <- unique(types)
+```
+
+Upload worm signatures
+
+```{r}
+load('../worms/Pre-calculated/Coefficients_from_full_model.RData')
+```
+
+Plot some
+
+```{r}
+clrs <- c("#2EBAED","#000000","#DE1C14","#D4D2D2","#ADCC54","#F0D0CE",
+          "brown","#8DD3C7","#FFFFB3","#BEBADA","darkmagenta")
+plot_fullsig_wb(beta_M_greta_full[,c('MMS','EMS')], colors = clrs, CI = T, 
+                low = beta_M_greta_full_low[,c('MMS','EMS')], high = beta_M_greta_full_high[,c('MMS','EMS')])
+```
+
+Now adjust the base sub and dinucleotide subs of the most interesting signatures to the human genome.
+
+```{r}
+humanized.sbs <- data.frame(beta_GH_greta_full, beta_M_greta_full,
+                       polk.1.mms = beta_M_greta_full[,'MMS'] * exp(beta_I_greta_full[,'polk.1.MMS']),
+                       polk.1.ems = beta_M_greta_full[,'EMS'] * exp(beta_I_greta_full[,'polk.1.EMS']),
+                       rev.3.mms = beta_M_greta_full[,'MMS'] * exp(beta_I_greta_full[,'rev.3.MMS']),
+                       rev.3.uv = beta_M_greta_full[,'UV'] * exp(beta_I_greta_full[,'rev.3.MMS']),
+                       xpf.1.aa = beta_M_greta_full[,'AristolochicAcid'] * exp(beta_I_greta_full[,'xpf.1.AristolochicAcid']),
+                       xpc.1.aa = beta_M_greta_full[,'AristolochicAcid'] * exp(beta_I_greta_full[,'xpc.1.AristolochicAcid']),
+                       xpc.1.uv = beta_M_greta_full[,'UV'] * exp(beta_I_greta_full[,'xpc.1.UV']),
+                       xpf.1.uv = beta_M_greta_full[,'UV'] * exp(beta_I_greta_full[,'xpf.1.UV']),
+                       xpa.1.ir = beta_M_greta_full[,'Radiation'] * exp(beta_I_greta_full[,'xpa.1.Radiation']),
+                       xpf.1.cis = beta_M_greta_full[,'Cisplatin'] * exp(beta_I_greta_full[,'xpf.1.Cisplatin']),
+                       xpc.1.cis = beta_M_greta_full[,'Cisplatin'] * exp(beta_I_greta_full[,'xpc.1.Cisplatin']))[1:96,]
+for (i in 1:ncol(humanized.sbs)) {
+  humanized.sbs[,i] <- humanized.sbs[,i] / sum(humanized.sbs[,i])
+  humanized.sbs[,i] <- humanized.sbs[,i] / worm.trinucleotides[types] * human.trinucleotides[types]
+  humanized.sbs[,i] <- humanized.sbs[,i] / sum(humanized.sbs[,i])
+}
+plot_sig_wb(humanized.sbs[,c('N2','MMS')])
+```
+
+Now compare them
+
+```{r}
+sapply(1:ncol(sbs_cancer_signatures), function(i) 
+  sapply(1:ncol(humanized.sbs), function(j) 
+    cosine(sbs_cancer_signatures[,i], humanized.sbs[,j]))) -> sims
+which(sims > 0.8, arr.ind = T) -> similar
+cbind(colnames(humanized.sbs)[similar[,1]],colnames(sbs_cancer_signatures)[similar[,2]])
+```
+
+Now plot them side by side
+
+```{r}
+human.sig.indices <- unique(similar[,2]) # 14 plots to check
+plot_sig_wb(data.frame(sbs_cancer_signatures[,human.sig.indices[1],drop=F], humanized.sbs[,similar[similar[,2] == human.sig.indices[1],1]]))
+```
+
+```{r}
+plot_sig_wb(data.frame(sbs_cancer_signatures[,human.sig.indices[2],drop=F], humanized.sbs[,similar[similar[,2] == human.sig.indices[2],1,drop=F]]))
+```
+
+```{r}
+plot_sig_wb(data.frame(sbs_cancer_signatures[,human.sig.indices[3],drop=F], humanized.sbs[,similar[similar[,2] == human.sig.indices[3],1],drop=F]))
+```
+
+```{r}
+plot_sig_wb(data.frame(sbs_cancer_signatures[,human.sig.indices[4],drop=F], humanized.sbs[,similar[similar[,2] == human.sig.indices[4],1],drop=F]))
+```
+
+```{r}
+plot_sig_wb(data.frame(sbs_cancer_signatures[,human.sig.indices[5],drop=F], humanized.sbs[,similar[similar[,2] == human.sig.indices[5],1],drop=F]))
+```
+
+```{r}
+plot_sig_wb(data.frame(sbs_cancer_signatures[,human.sig.indices[6],drop=F], humanized.sbs[,similar[similar[,2] == human.sig.indices[6],1],drop=F]))
+```
+
+```{r}
+plot_sig_wb(data.frame(sbs_cancer_signatures[,human.sig.indices[7],drop=F], humanized.sbs[,similar[similar[,2] == human.sig.indices[7],1],drop=F]))
+```
+
+```{r}
+plot_sig_wb(data.frame(sbs_cancer_signatures[,human.sig.indices[8],drop=F], humanized.sbs[,similar[similar[,2] == human.sig.indices[8],1],drop=F]))
+```
+
+```{r}
+plot_sig_wb(data.frame(sbs_cancer_signatures[,human.sig.indices[9],drop=F], humanized.sbs[,similar[similar[,2] == human.sig.indices[9],1],drop=F]))
+```
+
+```{r}
+plot_sig_wb(data.frame(sbs_cancer_signatures[,human.sig.indices[10],drop=F], humanized.sbs[,similar[similar[,2] == human.sig.indices[10],1],drop=F]))
+```
+
+```{r}
+plot_sig_wb(data.frame(sbs_cancer_signatures[,human.sig.indices[11],drop=F], humanized.sbs[,similar[similar[,2] == human.sig.indices[11],1],drop=F]))
+```
+
+```{r}
+plot_sig_wb(data.frame(sbs_cancer_signatures[,human.sig.indices[12],drop=F], humanized.sbs[,similar[similar[,2] == human.sig.indices[12],1],drop=F]))
+```
+
+```{r}
+plot_sig_wb(data.frame(sbs_cancer_signatures[,human.sig.indices[13],drop=F], humanized.sbs[,similar[similar[,2] == human.sig.indices[13],1],drop=F]))
+```
+
+```{r}
+plot_sig_wb(data.frame(sbs_cancer_signatures[,human.sig.indices[14],drop=F], humanized.sbs[,similar[similar[,2] == human.sig.indices[14],1],drop=F]))
+```
+
+Now let's compare DNV signatures.
+
+```{r}
+dnv.types <- substr(dnv.types.full,1,2)
+worm.dinucleotides <- colSums(dinucleotideFrequency(genome.seq))
+human.genome.seq <- getSeq(get(human_genome))[1:23]
+human.dinucleotides <- colSums(dinucleotideFrequency(human.genome.seq))
+dinucleotide.freq.factor <- sapply(unique(dnv.types), function(x) {
+  freq.worm <- worm.dinucleotides[x] + worm.dinucleotides[as.character(reverseComplement(DNAString(x)))]
+  freq.human <- human.dinucleotides[x] + human.dinucleotides[as.character(reverseComplement(DNAString(x)))]
+  return(freq.worm / freq.human) # tri.counts.genome is already classified w.r.t. pyrimidine reference
+})
+names(dinucleotide.freq.factor) <- unique(dnv.types)
+```
+
+Need to upload the high-res DNV spectra and extract signatures.
+```{r}
+dnv.spectrum <- read.csv('../worms/DNV_spectrum_most_recent.csv', row.names = 1)[,1:78]
+load('../worms/Pre-calculated/Mutagen_greta_data.RData')
+load('../worms/Pre-calculated/DNV_signatures_02102019.RData')
+mutagen_in_interactions <- sapply(colnames(beta_I_greta_full), function(x) colnames(M1)[M1[which(W[,x]>0)[1],]>0])
+dnv.sigs <- data.frame(beta_GH_greta_full, beta_M_greta_full, beta_M_greta_full[,mutagen_in_interactions] * exp(beta_I_greta_full))
+colnames(dnv.sigs) <- c(colnames(beta_GH_greta_full), colnames(beta_M_greta_full), colnames(beta_I_greta_full))
+```
+
+Now visualize some
+```{r}
+plot_dnv_only(dnv.sigs[,c("UV","Mitomycin")])
+```
+
+Now adjust for human frequencies and compare
+
+```{r}
+humanized.dbs <- dnv.sigs
+for (i in 1:nrow(dnv.sigs)) {
+  humanized.dbs[i,] <- dnv.sigs[i,] / sum(dnv.sigs[i,])
+  humanized.dbs[i,] <- humanized.dbs[i,] / dinucleotide.freq.factor[dnv.types]
+  humanized.dbs[i,] <- humanized.dbs[i,] / sum(humanized.dbs[i,])
+}
+plot_dnv_only(humanized.dbs[,c("UV","MMS")])
+```
+
+Compare
+
+```{r}
+sapply(1:ncol(dbs_cancer_signatures), function(i) 
+  sapply(1:ncol(humanized.dbs), function(j) 
+    cosine(dbs_cancer_signatures[,i], humanized.dbs[,j]))) -> sims
+which(sims > 0.8, arr.ind = T) -> similar
+cbind(colnames(humanized.dbs)[similar[,1]],colnames(dbs_cancer_signatures)[similar[,2]])
+```
+
+
+```{r}
+human.sig.indices <- unique(similar[,2]) # 4 plots to check
+plot_dnv_only(data.frame(dbs_cancer_signatures[,human.sig.indices[1],drop=F], humanized.dbs[,similar[similar[,2] == human.sig.indices[1],1],drop=F]))
+```
+
+```{r}
+plot_dnv_only(data.frame(dbs_cancer_signatures[,human.sig.indices[2],drop=F], humanized.dbs[,similar[similar[,2] == human.sig.indices[2],1],drop=F]))
+```
+
+```{r}
+plot_dnv_only(data.frame(dbs_cancer_signatures[,human.sig.indices[3],drop=F], humanized.dbs[,similar[similar[,2] == human.sig.indices[3],1],drop=F]))
+```
+
+DBS11 has no known aetiology, maybe APOBEC mutations. Is not really similar to xpf-1:UV.
+
+```{r}
+plot_dnv_only(data.frame(dbs_cancer_signatures[,human.sig.indices[4],drop=F], humanized.dbs[,similar[similar[,2] == human.sig.indices[4],1],drop=F]))
+```
+
+Now let's look at the indel profiles (these are quite tricky to adjust so I'll compare them on the worm scale).
+
+```{r}
+colnames(Y)[99:112]
+```
+
+```{r}
+regrouped.id.sigs <- rbind(colSums(id_cancer_signatures[c(3:6,9:12),]), colSums(id_cancer_signatures[c(1:2,7:8),]),
+                           colSums(id_cancer_signatures[c(27:30,33:36,39:42),]), colSums(id_cancer_signatures[c(25:26,31:32,37:38,73:78),]),
+                           colSums(id_cancer_signatures[c(43:48,79:83),]), 0,
+                           0,0,
+                           colSums(id_cancer_signatures[c(15:18,21:24),]), colSums(id_cancer_signatures[c(13:14,19:20),]),
+                           colSums(id_cancer_signatures[c(51:54,57:60,63:66),]), colSums(id_cancer_signatures[c(49:50,55:56,61:62),]),
+                           colSums(id_cancer_signatures[c(67:72),]), 0)
+rownames(regrouped.id.sigs)  <- colnames(Y)[99:112]
+```
+
+```{r}
+for (i in 1:17)
+  barplot(regrouped.id.sigs[,i], col = c(rep(clrs[8],6), rep(clrs[9],2), rep(clrs[10],6)), las = 2)
+```
+
+```{r}
+load('../worms/Pre-calculated/Coefficients_from_full_model.RData')
+all.sigs <- data.frame(beta_GH_greta_full, beta_M_greta_full, beta_M_greta_full[,mutagen_in_interactions] * exp(beta_I_greta_full))
+colnames(all.sigs) <- c(colnames(beta_GH_greta_full), colnames(beta_M_greta_full), colnames(beta_I_greta_full))
+names(which(colSums(all.sigs[99:112,])>3)) -> indels.to.plot
+for (i in 1:length(indels.to.plot))
+  barplot(all.sigs[99:112,indels.to.plot[i]], col = c(rep(clrs[8],6), rep(clrs[9],2), rep(clrs[10],6)), las = 2, main = indels.to.plot[i])
+```
+
